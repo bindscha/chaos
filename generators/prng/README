@@ -1,0 +1,9 @@
+Multiple recursive generator from L'Ecuyer, P., Blouin, F., and      
+Couture, R. 1993. A search for good multiple recursive random number 
+generators. ACM Trans. Model. Comput. Simul. 3, 2 (Apr. 1993), 87-98.
+DOI= http://doi.acm.org/10.1145/169702.169698 -- particular generator
+used is from table 3, entry for m = 2^31 - 1, k = 5 (same generator  
+is used in GNU Scientific Library).                                  
+
+Authors: Jeremiah Willcock, Indiana University
+         Andrew Lumsdaine, Indiana University
