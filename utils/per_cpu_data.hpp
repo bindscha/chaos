@@ -21,9 +21,9 @@
 namespace algorithm {
   class per_processor_data {
   public:
-    virtual bool reduce(per_processor_data **per_cpu_array,
-			unsigned long processors)
-    = 0; 
+      virtual bool reduce(per_processor_data **per_cpu_array,
+                          unsigned long processors)
+          = 0;
   };
 }
 

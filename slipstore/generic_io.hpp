@@ -19,10 +19,10 @@
 #ifndef _GENERIC_IO_
 #define _GENERIC_IO_
 namespace slipstore {
-  
+
   struct fsnap {
-    unsigned long pos;
-    unsigned long size;
+      unsigned long pos;
+      unsigned long size;
   };
 
   extern unsigned long quota;
@@ -31,23 +31,34 @@ namespace slipstore {
 
   class slipstore_io {
   public:
-    virtual unsigned long fill(unsigned char *buffer, 
-			       unsigned long size) = 0;
-    virtual unsigned long seek_and_fill(unsigned char *buffer,
-					unsigned long offset,
-					unsigned long size) = 0;
-    virtual void drain(unsigned char *buffer,
-		       unsigned long size) = 0;
-    virtual bool eof()                     = 0;
-    virtual unsigned long size()           = 0;
-    virtual unsigned long left()           = 0;
-    virtual void rewind()                  = 0;
-    virtual void trunc()                   = 0;
-    virtual void take_snap(unsigned long no, fsnap *meta) = 0;
-    virtual void restore_snap(unsigned long no,
-			      fsnap *meta) = 0;
-    virtual void delete_snap(unsigned long no) = 0;
-    virtual ~slipstore_io() {}
+      virtual unsigned long fill(unsigned char *buffer,
+                                 unsigned long size) = 0;
+
+      virtual unsigned long seek_and_fill(unsigned char *buffer,
+                                          unsigned long offset,
+                                          unsigned long size) = 0;
+
+      virtual void drain(unsigned char *buffer,
+                         unsigned long size) = 0;
+
+      virtual bool eof() = 0;
+
+      virtual unsigned long size() = 0;
+
+      virtual unsigned long left() = 0;
+
+      virtual void rewind() = 0;
+
+      virtual void trunc() = 0;
+
+      virtual void take_snap(unsigned long no, fsnap *meta) = 0;
+
+      virtual void restore_snap(unsigned long no,
+                                fsnap *meta) = 0;
+
+      virtual void delete_snap(unsigned long no) = 0;
+
+      virtual ~slipstore_io() { }
   };
 }
 #endif

@@ -22,12 +22,11 @@
 
 #define TOLOCK (1024*1024UL)
 
-int main()
-{
+int main() {
   fprintf(stderr, "Locking %lu bytes", TOLOCK);
-  void * dummy = map_anon_memory(TOLOCK, true, "Dummy");
-  (void)dummy;
-  while(1) {
+  void *dummy = map_anon_memory(TOLOCK, true, "Dummy");
+  (void) dummy;
+  while (1) {
     pause();
   }
   fprintf(stderr, "Exiting .. this should not happen !");

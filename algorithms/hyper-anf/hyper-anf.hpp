@@ -18,6 +18,7 @@
 
 #ifndef _HYPERANF_
 #define _HYPERANF_
+
 #include "../../utils/per_cpu_data.hpp"
 #include "../../core/autotuner.hpp"
 #include "../../utils/options_utils.h"
@@ -25,290 +26,271 @@
 #include "../../utils/hyperloglog.h"
 #include<errno.h>
 #include<string>
+
 namespace algorithm {
   namespace sg_simple {
-    class hyperanf_pp_data:public per_processor_data {
-      static unsigned long iteration;
-      static float global_neighbour_cnt;
-      // stopping conditions (could be made static)
-      unsigned long maxiters;
-      bool run_to_completion;
+    class hyperanf_pp_data : public per_processor_data {
+        static unsigned long iteration;
+        static float global_neighbour_cnt;
+        // stopping conditions (could be made static)
+        unsigned long maxiters;
+        bool run_to_completion;
     public:
-      float local_neighbour_cnt;
-      float local_seed_reach;
-      vertex_t local_seed;
-      hyperanf_pp_data()
-	:local_neighbour_cnt(0),
-	 local_seed_reach(0.0f),
-	 local_seed(0)
-      {
-	maxiters = vm["hyperanf::maxiters"].as<unsigned long>();
-	run_to_completion = (vm.count("hyperanf::run_to_completion") > 0);
-      }
-      bool reduce(per_processor_data ** per_cpu_array,
-		  unsigned long processors)
-      {
-	if(iteration == 0) {
-	  iteration++;
-	  return false; // Nothing done in iteration zero
-	}
-	float sum = 0.0;
-	float seed_reach = 0.0;
-	vertex_t seed = (vertex_t)-1;
-	for(unsigned long i=0;i<processors;i++) {
-	  hyperanf_pp_data * cpu_data =
-	    static_cast<hyperanf_pp_data *>(per_cpu_array[i]);
-	  sum += cpu_data->local_neighbour_cnt;
-	  cpu_data->local_neighbour_cnt = 0;
-	  if(cpu_data->local_seed_reach  > seed_reach) {
-	    seed_reach = cpu_data->local_seed_reach;
-	    seed = cpu_data->local_seed;
-	  }
-	  cpu_data->local_seed_reach = 0.0f;
-	  cpu_data->local_seed = 0;
-	}
-	BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF " << 
-	  (iteration - 1) << " " << std::fixed << sum;
-	BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF::SEED " << seed;
-	BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF::SEED_REACH " << 
-	  std::fixed << seed_reach;
-	iteration++;
-	if(run_to_completion) {
-	  return false;
-	}
-	else if(iteration >= maxiters) {
-	  BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF::iter_stop " << maxiters;
-	  return true;
-	}
-	else {
-	  return false;
-	}
-      }
+        float local_neighbour_cnt;
+        float local_seed_reach;
+        vertex_t local_seed;
+
+        hyperanf_pp_data()
+            : local_neighbour_cnt(0),
+              local_seed_reach(0.0f),
+              local_seed(0) {
+          maxiters = vm["hyperanf::maxiters"].as < unsigned
+          long > ();
+          run_to_completion = (vm.count("hyperanf::run_to_completion") > 0);
+        }
+
+        bool reduce(per_processor_data **per_cpu_array,
+                    unsigned long processors) {
+          if (iteration == 0) {
+            iteration++;
+            return false; // Nothing done in iteration zero
+          }
+          float sum = 0.0;
+          float seed_reach = 0.0;
+          vertex_t seed = (vertex_t) - 1;
+          for (unsigned long i = 0; i < processors; i++) {
+            hyperanf_pp_data *cpu_data =
+                static_cast<hyperanf_pp_data *>(per_cpu_array[i]);
+            sum += cpu_data->local_neighbour_cnt;
+            cpu_data->local_neighbour_cnt = 0;
+            if (cpu_data->local_seed_reach > seed_reach) {
+              seed_reach = cpu_data->local_seed_reach;
+              seed = cpu_data->local_seed;
+            }
+            cpu_data->local_seed_reach = 0.0f;
+            cpu_data->local_seed = 0;
+          }
+          BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF " <<
+          (iteration - 1) << " " << std::fixed << sum;
+          BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF::SEED " << seed;
+          BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF::SEED_REACH " <<
+          std::fixed << seed_reach;
+          iteration++;
+          if (run_to_completion) {
+            return false;
+          }
+          else if (iteration >= maxiters) {
+            BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ANF::iter_stop " << maxiters;
+            return true;
+          }
+          else {
+            return false;
+          }
+        }
     } __attribute__((__aligned__(64)));
+
     template<typename F>
     class hyperanf {
-      static struct hyper_log_log_params hll_param;
+        static struct hyper_log_log_params hll_param;
 
     public:
 
-      static
-      bool need_data_barrier()
-      {
-	return false;
-      }
+        static
+        bool need_data_barrier() {
+          return false;
+        }
 
-      static unsigned long checkpoint_size()
-      {
-	return sizeof(unsigned long) + sizeof(float);
-      }
+        static unsigned long checkpoint_size() {
+          return sizeof(unsigned long) + sizeof(float);
+        }
 
-      static void take_checkpoint(unsigned char* buffer,
-				  per_processor_data **per_cpu_array,
-				  unsigned long processors)
-      {
-	hyperanf_pp_data * data = 
-	  static_cast<hyperanf_pp_data *>(per_cpu_array[0]);
-	(void)data->reduce(per_cpu_array, processors);
-	memcpy(buffer, &hyperanf_pp_data::iteration, sizeof(unsigned long));
-	buffer += sizeof(unsigned long);
-	memcpy(buffer, &hyperanf_pp_data::global_neighbour_cnt, sizeof(float));
-      }
+        static void take_checkpoint(unsigned char *buffer,
+                                    per_processor_data **per_cpu_array,
+                                    unsigned long processors) {
+          hyperanf_pp_data *data =
+              static_cast<hyperanf_pp_data *>(per_cpu_array[0]);
+          (void) data->reduce(per_cpu_array, processors);
+          memcpy(buffer, &hyperanf_pp_data::iteration, sizeof(unsigned long));
+          buffer += sizeof(unsigned long);
+          memcpy(buffer, &hyperanf_pp_data::global_neighbour_cnt, sizeof(float));
+        }
 
-      static void restore_checkpoint(unsigned char* buffer,
-				     per_processor_data **per_cpu_array,
-				     unsigned long processors)
-      {
-	memcpy(&hyperanf_pp_data::iteration, buffer, sizeof(unsigned long));
-	buffer += sizeof(unsigned long);
-	memcpy(&hyperanf_pp_data::global_neighbour_cnt, buffer, sizeof(float));
-      }
-      
-      class db_sync {
-      public:
-	void prep_db_data(per_processor_data **pcpu_array,
-			  unsigned long me,
-			  unsigned long processors)
-	{}
+        static void restore_checkpoint(unsigned char *buffer,
+                                       per_processor_data **per_cpu_array,
+                                       unsigned long processors) {
+          memcpy(&hyperanf_pp_data::iteration, buffer, sizeof(unsigned long));
+          buffer += sizeof(unsigned long);
+          memcpy(&hyperanf_pp_data::global_neighbour_cnt, buffer, sizeof(float));
+        }
 
-	void finalize_db_data(per_processor_data **pcpu_array,
-			      unsigned long me,
-			      unsigned long processors)
-	{}
-	
-	unsigned char *db_buffer() 
-	{return NULL;}
+        class db_sync {
+        public:
+            void prep_db_data(per_processor_data **pcpu_array,
+                              unsigned long me,
+                              unsigned long processors) { }
 
-	unsigned long db_size()
-	{ return 0;}
+            void finalize_db_data(per_processor_data **pcpu_array,
+                                  unsigned long me,
+                                  unsigned long processors) { }
 
-	void db_generate()
-	{}
+            unsigned char *db_buffer() { return NULL; }
 
-	void db_merge()
-	{}
+            unsigned long db_size() { return 0; }
 
-	void db_absorb()
-	{}
-      };
-      
-      static
-      db_sync * get_db_sync()
-      {
-	return NULL;
-      }
+            void db_generate() { }
 
-      struct __attribute__((__packed__)) hyperanf_update {
-	vertex_t dst;
-	unsigned char hll_ctr[0] HLL_ALIGN;
-      };
-      struct __attribute__((__packed__)) hyperanf_vertex {
-	bool changed;
-	float count;
-	unsigned char hll_ctr[0] HLL_ALIGN;
-      };
-      static unsigned long split_size_bytes()
-      {
-	return sizeof(struct hyperanf_update) + 
-	  sizeof_hll_counter(&hll_param);
-      }
-      static unsigned long vertex_state_bytes()
-      {
-	return sizeof(hyperanf_vertex) +
-	  sizeof_hll_counter(&hll_param);
-      }
-      
-      static hyperanf_vertex * 
-      index_vertices(unsigned char *vstream, unsigned long index)
-      {
-	return (hyperanf_vertex *)(vstream + index*vertex_state_bytes());
-      }
+            void db_merge() { }
 
-      static unsigned long split_key(unsigned char *buffer,
-				     unsigned long jump)
-      {
-	struct hyperanf_update *update = (struct hyperanf_update *)buffer;
-	vertex_t key = update->dst;
-	key = key >> jump;
-	return key;
-      }
+            void db_absorb() { }
+        };
 
-      static bool need_scatter_merge(unsigned long bsp_phase)
-      {
-	return false;
-      }
+        static
+        db_sync *get_db_sync() {
+          return NULL;
+        }
 
-      static void vertex_apply(unsigned char *v,
-			       unsigned char *copy,
-			       unsigned long copy_machine,
-			       per_processor_data *per_cpu_data,
-			       unsigned long bsp_phase)
-      {
-	struct hyperanf_vertex *vtx     = (struct hyperanf_vertex *)v;
-	struct hyperanf_vertex *vtx_cpy = (struct hyperanf_vertex *)copy;
-	bool changed = hll_union(vtx->hll_ctr, vtx_cpy->hll_ctr, &hll_param);
-	vtx->changed = vtx->changed || changed;
-      }
-      
-      static bool apply_one_update(unsigned char *vertex_state,
-				   unsigned char *update_stream,
-				   per_processor_data *per_cpu_data,
-				   bool local_tile,
-				   unsigned long bsp_phase)
-      {
-	hyperanf_update *u   = (hyperanf_update *)update_stream;
-	hyperanf_vertex *vertex = index_vertices
-	  (vertex_state, x_lib::configuration::map_offset(u->dst));
-	bool changed = hll_union(vertex->hll_ctr, u->hll_ctr, &hll_param);
-	vertex->changed = vertex->changed || changed;
-	return changed;
-      }
-    
-      static bool generate_update(unsigned char *vertex_state,
-				  unsigned char *edge_format,
-				  unsigned char *update_stream,
-				  per_processor_data *per_cpu_data,
-				  bool local_tile,
-				  unsigned long bsp_phase)
-      {
-	vertex_t src, dst;
-	F::read_edge(edge_format, src, dst);
-	hyperanf_vertex *vertex = index_vertices
-	  (vertex_state, x_lib::configuration::map_offset(src));
-	if(vertex->changed) {
-	  hyperanf_update *u   = (hyperanf_update *)update_stream;
-	  memcpy(u->hll_ctr, vertex->hll_ctr,
-		 sizeof_hll_counter(&hll_param));
-	  u->dst = dst;
-	  return true;
-	}
-	else {
-	  return false;
-	}
-      }
-      
-      static bool init(unsigned char *vertex_state,
-		       unsigned long vertex_index,
-		       unsigned long bsp_phase,
-		       per_processor_data *cpu_state)
-      {
-	struct hyperanf_vertex *vstate = (struct hyperanf_vertex *)vertex_state;
-	if(bsp_phase == 0) {
-	  hll_init(vstate->hll_ctr, &hll_param);
-	  unsigned long hash = jenkins(vertex_index, 0xdeadbeef);
-	  add_hll_counter(&hll_param, vstate->hll_ctr, hash);
-	  vstate->changed = true;
-	  return true;
-	}
-	else {
-	  // rollup counters
-	  hyperanf_pp_data * pp_data = 
-	    static_cast<hyperanf_pp_data *>(cpu_state);
-	  if(vstate->changed) {
-	    vstate->count = count_hll_counter(&hll_param, vstate->hll_ctr);
-	    vstate->changed = false;
-	  }
-	  pp_data->local_neighbour_cnt += vstate->count;
-	  if(vstate->count > pp_data->local_seed_reach) {
-	    pp_data->local_seed_reach = vstate->count;
-	    pp_data->local_seed       = vertex_index;
-	  }
-	  return false;
-	}
-      }
-      
-      static bool need_init(unsigned long bsp_phase)
-      {
-	return true;
-      }
+        struct __attribute__((__packed__)) hyperanf_update {
+            vertex_t dst;
+            unsigned char hll_ctr[0] HLL_ALIGN;
+        };
+        struct __attribute__((__packed__)) hyperanf_vertex {
+            bool changed;
+            float count;
+            unsigned char hll_ctr[0] HLL_ALIGN;
+        };
 
-      static per_processor_data *
-      create_per_processor_data(unsigned long processor_id,
-				unsigned long machines)
-      {
-	return new hyperanf_pp_data();
-      }
-      
-      static void preprocessing()
-      {
-	setup_hll_params(&hll_param, vm["hyperanf::rsd"].as<float>());
-	print_hll_params(&hll_param);
-	if(pt.get<unsigned long>("graph.vertices") > (1UL << 60)) {
-	  BOOST_LOG_TRIVIAL(fatal) << "Graph too large for hyper anf !";
-	  exit(-1);
-	}
-      }
+        static unsigned long split_size_bytes() {
+          return sizeof(struct hyperanf_update) +
+                 sizeof_hll_counter(&hll_param);
+        }
 
-      static void postprocessing()
-      {
-      
-      }
+        static unsigned long vertex_state_bytes() {
+          return sizeof(hyperanf_vertex) +
+                 sizeof_hll_counter(&hll_param);
+        }
 
-      static unsigned long min_super_phases()
-      {
-	return 1;
-      }
+        static hyperanf_vertex *
+        index_vertices(unsigned char *vstream, unsigned long index) {
+          return (hyperanf_vertex *) (vstream + index * vertex_state_bytes());
+        }
+
+        static unsigned long split_key(unsigned char *buffer,
+                                       unsigned long jump) {
+          struct hyperanf_update *update = (struct hyperanf_update *) buffer;
+          vertex_t key = update->dst;
+          key = key >> jump;
+          return key;
+        }
+
+        static bool need_scatter_merge(unsigned long bsp_phase) {
+          return false;
+        }
+
+        static void vertex_apply(unsigned char *v,
+                                 unsigned char *copy,
+                                 unsigned long copy_machine,
+                                 per_processor_data *per_cpu_data,
+                                 unsigned long bsp_phase) {
+          struct hyperanf_vertex *vtx = (struct hyperanf_vertex *) v;
+          struct hyperanf_vertex *vtx_cpy = (struct hyperanf_vertex *) copy;
+          bool changed = hll_union(vtx->hll_ctr, vtx_cpy->hll_ctr, &hll_param);
+          vtx->changed = vtx->changed || changed;
+        }
+
+        static bool apply_one_update(unsigned char *vertex_state,
+                                     unsigned char *update_stream,
+                                     per_processor_data *per_cpu_data,
+                                     bool local_tile,
+                                     unsigned long bsp_phase) {
+          hyperanf_update *u = (hyperanf_update *) update_stream;
+          hyperanf_vertex *vertex = index_vertices
+              (vertex_state, x_lib::configuration::map_offset(u->dst));
+          bool changed = hll_union(vertex->hll_ctr, u->hll_ctr, &hll_param);
+          vertex->changed = vertex->changed || changed;
+          return changed;
+        }
+
+        static bool generate_update(unsigned char *vertex_state,
+                                    unsigned char *edge_format,
+                                    unsigned char *update_stream,
+                                    per_processor_data *per_cpu_data,
+                                    bool local_tile,
+                                    unsigned long bsp_phase) {
+          vertex_t src, dst;
+          F::read_edge(edge_format, src, dst);
+          hyperanf_vertex *vertex = index_vertices
+              (vertex_state, x_lib::configuration::map_offset(src));
+          if (vertex->changed) {
+            hyperanf_update *u = (hyperanf_update *) update_stream;
+            memcpy(u->hll_ctr, vertex->hll_ctr,
+                   sizeof_hll_counter(&hll_param));
+            u->dst = dst;
+            return true;
+          }
+          else {
+            return false;
+          }
+        }
+
+        static bool init(unsigned char *vertex_state,
+                         unsigned long vertex_index,
+                         unsigned long bsp_phase,
+                         per_processor_data *cpu_state) {
+          struct hyperanf_vertex *vstate = (struct hyperanf_vertex *) vertex_state;
+          if (bsp_phase == 0) {
+            hll_init(vstate->hll_ctr, &hll_param);
+            unsigned long hash = jenkins(vertex_index, 0xdeadbeef);
+            add_hll_counter(&hll_param, vstate->hll_ctr, hash);
+            vstate->changed = true;
+            return true;
+          }
+          else {
+            // rollup counters
+            hyperanf_pp_data *pp_data =
+                static_cast<hyperanf_pp_data *>(cpu_state);
+            if (vstate->changed) {
+              vstate->count = count_hll_counter(&hll_param, vstate->hll_ctr);
+              vstate->changed = false;
+            }
+            pp_data->local_neighbour_cnt += vstate->count;
+            if (vstate->count > pp_data->local_seed_reach) {
+              pp_data->local_seed_reach = vstate->count;
+              pp_data->local_seed = vertex_index;
+            }
+            return false;
+          }
+        }
+
+        static bool need_init(unsigned long bsp_phase) {
+          return true;
+        }
+
+        static per_processor_data *
+        create_per_processor_data(unsigned long processor_id,
+                                  unsigned long machines) {
+          return new hyperanf_pp_data();
+        }
+
+        static void preprocessing() {
+          setup_hll_params(&hll_param, vm["hyperanf::rsd"].as<float>());
+          print_hll_params(&hll_param);
+          if (pt.get < unsigned
+          long > ("graph.vertices") > (1UL << 60)) {
+            BOOST_LOG_TRIVIAL(fatal) << "Graph too large for hyper anf !";
+            exit(-1);
+          }
+        }
+
+        static void postprocessing() {
+
+        }
+
+        static unsigned long min_super_phases() {
+          return 1;
+        }
     };
-    unsigned long hyperanf_pp_data::iteration     = 0;
+
+    unsigned long hyperanf_pp_data::iteration = 0;
     float hyperanf_pp_data::global_neighbour_cnt = 0.0;
     template<typename F>
     struct hyper_log_log_params hyperanf<F>::hll_param;

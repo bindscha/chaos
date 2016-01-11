@@ -18,43 +18,44 @@
 
 #ifndef _X_INGEST_
 #define _X_INGEST_
+
 #include<sys/types.h>
 #include<sys/shm.h>
 #include "../utils/boost_log_wrapper.h"
+
 struct ingest_t {
-  unsigned long max;
-  volatile unsigned long avail;
-  volatile bool eof;
-  unsigned char buffer[0];
+    unsigned long max;
+    volatile unsigned long avail;
+    volatile bool eof;
+    unsigned char buffer[0];
 };
 
 static
-ingest_t* attach_ingest(unsigned long key)
-{
-  void * data = shmat(shmget(key, 1, S_IRWXU), NULL, 0);
-  if(data == MAP_FAILED) {
+ingest_t *attach_ingest(unsigned long key) {
+  void *data = shmat(shmget(key, 1, S_IRWXU), NULL, 0);
+  if (data == MAP_FAILED) {
     perror("Failed to attach to ingest SHM:");
     exit(-1);
   }
-  return (ingest_t*) data;
+  return (ingest_t *) data;
 }
 
 static
-ingest_t* create_ingest_buffer(unsigned long key,
-			       unsigned long size)
-{
-  int shmid = shmget(key, 
-		     sizeof(ingest_t) + size,
-		     S_IRWXU|IPC_CREAT);
-  if(shmid == -1) {
+ingest_t *create_ingest_buffer(unsigned long key,
+                               unsigned long size) {
+  int shmid = shmget(key,
+                     sizeof(ingest_t) + size,
+                     S_IRWXU | IPC_CREAT);
+  if (shmid == -1) {
     perror("Failed to create delta segment:");
     exit(-1);
   }
-  ingest_t * ingest = attach_ingest(key);
-  ingest->max   = size;
+  ingest_t *ingest = attach_ingest(key);
+  ingest->max = size;
   ingest->avail = 0;
-  ingest->eof   = false;
+  ingest->eof = false;
   BOOST_LOG_TRIVIAL(info) << "Ingest buffer ready";
   return ingest;
 }
+
 #endif

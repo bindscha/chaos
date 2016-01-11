@@ -18,192 +18,180 @@
 
 #ifndef _DUMMY_IO_
 #define _DUMMY_IO_
+
 #include "generic_io.hpp"
+
 namespace slipstore {
-  class dummy_io:public slipstore_io {
-    unsigned long stream;
-    unsigned long partition;
-    unsigned long tile;
-    unsigned long seen_bytes;
-    unsigned long data_bytes;
-    char name[100];
-    int fd;
-    bool snapped;
+  class dummy_io : public slipstore_io {
+      unsigned long stream;
+      unsigned long partition;
+      unsigned long tile;
+      unsigned long seen_bytes;
+      unsigned long data_bytes;
+      char name[100];
+      int fd;
+      bool snapped;
   public:
-    dummy_io(unsigned long stream_in,
-	     unsigned long partition_in,
-	     unsigned long tile_in,
-	     const char *name_in = NULL)
-      :stream(stream_in),
-       partition(partition_in),
-       tile(tile_in),
-       seen_bytes(0),
-       snapped(false)
-    {
-      if(name_in != NULL) {
-	strcpy(name, name_in);
-	fd = open(name, O_RDWR|O_LARGEFILE, S_IRWXU);
-	data_bytes = get_file_size(fd);
+      dummy_io(unsigned long stream_in,
+               unsigned long partition_in,
+               unsigned long tile_in,
+               const char *name_in = NULL)
+          : stream(stream_in),
+            partition(partition_in),
+            tile(tile_in),
+            seen_bytes(0),
+            snapped(false) {
+        if (name_in != NULL) {
+          strcpy(name, name_in);
+          fd = open(name, O_RDWR | O_LARGEFILE, S_IRWXU);
+          data_bytes = get_file_size(fd);
+        }
+        else {
+          sprintf(name, "stream.%lu.%lu.%lu", stream, partition, tile);
+          // This prevents us from over writing any snapshots
+          unlink_file(name);
+          fd = open(name,
+                    O_RDWR | O_LARGEFILE | O_CREAT | O_TRUNC,
+                    S_IRWXU);
+          data_bytes = 0;
+        }
+        posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
       }
-      else{
-	sprintf(name, "stream.%lu.%lu.%lu", stream, partition, tile);
-	// This prevents us from over writing any snapshots
-	unlink_file(name);
-	fd = open(name, 
-		  O_RDWR|O_LARGEFILE|O_CREAT|O_TRUNC,
-		  S_IRWXU);
-	data_bytes = 0;
-      }
-      posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
-    }
-    
-    void force_file_size(unsigned long size)
-    {
-      data_bytes = size;
-    }
 
-    virtual unsigned long fill(unsigned char *buffer, 
-			       unsigned long size)
-    {
-      unsigned long remaining_bytes = data_bytes - seen_bytes;
-      if(size > remaining_bytes) {
-	size = remaining_bytes;
+      void force_file_size(unsigned long size) {
+        data_bytes = size;
       }
-      seen_bytes += size;
-      // Dont actually do the I/O
-      //read_from_file(fd, buffer, size);
-      return size;
-    }
 
-    virtual unsigned long seek_and_fill(unsigned char *buffer, 
-					unsigned long offset,
-					unsigned long size)
-    {
-      unsigned long remaining_bytes;
-      set_filepos(fd, offset);
-      seen_bytes = offset;
-      remaining_bytes = data_bytes - seen_bytes;
-      if(size > remaining_bytes) {
-	size = remaining_bytes;
+      virtual unsigned long fill(unsigned char *buffer,
+                                 unsigned long size) {
+        unsigned long remaining_bytes = data_bytes - seen_bytes;
+        if (size > remaining_bytes) {
+          size = remaining_bytes;
+        }
+        seen_bytes += size;
+        // Dont actually do the I/O
+        //read_from_file(fd, buffer, size);
+        return size;
       }
-      seen_bytes += size;
-      // Dont actually do the I/O
-      //read_from_file(fd, buffer, size);
-      return size;
-    }
-    
-    virtual void drain(unsigned char *buffer,
-		       unsigned long size)
-    {
-      seen_bytes += size;
-      // Don't actually do the IO
-      //write_to_file(fd, buffer, size);
+
+      virtual unsigned long seek_and_fill(unsigned char *buffer,
+                                          unsigned long offset,
+                                          unsigned long size) {
+        unsigned long remaining_bytes;
+        set_filepos(fd, offset);
+        seen_bytes = offset;
+        remaining_bytes = data_bytes - seen_bytes;
+        if (size > remaining_bytes) {
+          size = remaining_bytes;
+        }
+        seen_bytes += size;
+        // Dont actually do the I/O
+        //read_from_file(fd, buffer, size);
+        return size;
+      }
+
+      virtual void drain(unsigned char *buffer,
+                         unsigned long size) {
+        seen_bytes += size;
+        // Don't actually do the IO
+        //write_to_file(fd, buffer, size);
 #ifdef FLUSH_PERIODIC
-      if(((data_bytes + size)/(4*1024*1024)) !=
-	 (data_bytes/(4*1024*1024))) {
-	fdatasync(fd);
-      }
+        if(((data_bytes + size)/(4*1024*1024)) !=
+     (data_bytes/(4*1024*1024))) {
+    fdatasync(fd);
+        }
 #endif
-      data_bytes += size;
-      usage += size;
-      if(usage > max_quota_usage) {
-	max_quota_usage = usage;
+        data_bytes += size;
+        usage += size;
+        if (usage > max_quota_usage) {
+          max_quota_usage = usage;
+        }
       }
-    }
-    
-    virtual bool eof()
-    {
-      return seen_bytes == data_bytes;
-    }
-    
-    virtual unsigned long size()
-    {
-      return data_bytes;
-    }
 
-    virtual unsigned long left()
-    {
-      return data_bytes - seen_bytes;
-    }
-    
-    virtual void rewind()
-    {
-      rewind_file(fd);
-      seen_bytes = 0;
-    }
-
-    virtual void trunc()
-    {
-      if(!snapped){
-	rewind_file(fd);
-	truncate_file(fd);
+      virtual bool eof() {
+        return seen_bytes == data_bytes;
       }
-      else {
-	close(fd);
-	unlink_file(name);
-	fd = open(name, 
-		  O_RDWR|O_LARGEFILE|O_CREAT|O_TRUNC,
-		  S_IRWXU);
-	posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
-	snapped = false;
+
+      virtual unsigned long size() {
+        return data_bytes;
       }
-      usage     -= data_bytes;
-      seen_bytes = 0;
-      data_bytes = 0;
-    }
 
-    virtual void take_snap(unsigned long no, fsnap *meta)
-    {
-      char new_name[200];
-      fsync(fd);
-      sprintf(new_name, "snap_%lu_",no);
-      strcat(new_name, name);
-      int ret = link(name, new_name);
-      if(ret < 0) {
-	BOOST_LOG_TRIVIAL(fatal) << "Unable to create snap link"
-				 << strerror(errno);
-	exit(-1);
+      virtual unsigned long left() {
+        return data_bytes - seen_bytes;
       }
-      snapped   = true;
-      meta->pos  = seen_bytes;
-      meta->size = data_bytes;
-    }
 
-    virtual void restore_snap(unsigned long no,
-			      fsnap *meta)
-    {
-      char snap_name[200];
-      close(fd);
-      unlink_file(name);
-      sprintf(snap_name, "snap_%lu_", no);
-      strcat(snap_name, name);
-      int ret = link(snap_name, name);
-      if(ret < 0) {
-	BOOST_LOG_TRIVIAL(fatal) << "Unable to create snap link"
-				 << strerror(errno);
-	exit(-1);
+      virtual void rewind() {
+        rewind_file(fd);
+        seen_bytes = 0;
       }
-      fd = open(name, O_RDWR|O_LARGEFILE);
-      posix_fadvise(fd, 0, 0,POSIX_FADV_SEQUENTIAL);
-      truncate_file_to_size(fd, meta->size);
-      data_bytes = meta->size;
-      set_filepos(fd, meta->pos);
-      seen_bytes = meta->pos;
-      snapped = true;
-    }
 
-    virtual void delete_snap(unsigned long no)
-    {
-      char snap_name[200];
-      sprintf(snap_name, "snap_%lu_", no);
-      strcat(snap_name, name);
-      unlink_file(snap_name);
-    }
+      virtual void trunc() {
+        if (!snapped) {
+          rewind_file(fd);
+          truncate_file(fd);
+        }
+        else {
+          close(fd);
+          unlink_file(name);
+          fd = open(name,
+                    O_RDWR | O_LARGEFILE | O_CREAT | O_TRUNC,
+                    S_IRWXU);
+          posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+          snapped = false;
+        }
+        usage -= data_bytes;
+        seen_bytes = 0;
+        data_bytes = 0;
+      }
 
-    virtual ~dummy_io()
-    {
-      close(fd);
-    }
+      virtual void take_snap(unsigned long no, fsnap *meta) {
+        char new_name[200];
+        fsync(fd);
+        sprintf(new_name, "snap_%lu_", no);
+        strcat(new_name, name);
+        int ret = link(name, new_name);
+        if (ret < 0) {
+          BOOST_LOG_TRIVIAL(fatal) << "Unable to create snap link"
+          << strerror(errno);
+          exit(-1);
+        }
+        snapped = true;
+        meta->pos = seen_bytes;
+        meta->size = data_bytes;
+      }
+
+      virtual void restore_snap(unsigned long no,
+                                fsnap *meta) {
+        char snap_name[200];
+        close(fd);
+        unlink_file(name);
+        sprintf(snap_name, "snap_%lu_", no);
+        strcat(snap_name, name);
+        int ret = link(snap_name, name);
+        if (ret < 0) {
+          BOOST_LOG_TRIVIAL(fatal) << "Unable to create snap link"
+          << strerror(errno);
+          exit(-1);
+        }
+        fd = open(name, O_RDWR | O_LARGEFILE);
+        posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+        truncate_file_to_size(fd, meta->size);
+        data_bytes = meta->size;
+        set_filepos(fd, meta->pos);
+        seen_bytes = meta->pos;
+        snapped = true;
+      }
+
+      virtual void delete_snap(unsigned long no) {
+        char snap_name[200];
+        sprintf(snap_name, "snap_%lu_", no);
+        strcat(snap_name, name);
+        unlink_file(snap_name);
+      }
+
+      virtual ~dummy_io() {
+        close(fd);
+      }
   };
 }
 #endif

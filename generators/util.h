@@ -24,15 +24,13 @@
 #include "defs.h"
 #include "output.h"
 
-inline double get_time()
-{
+inline double get_time() {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return tv.tv_sec + tv.tv_usec * 1.e-6;
 }
 
-inline size_t calculate_buffer_size(const size_t cmdline_value)
-{
+inline size_t calculate_buffer_size(const size_t cmdline_value) {
   size_t buffer_size = cmdline_value;
   if (!buffer_size) {
     buffer_size = 256 * DEFAULT_BLOCK_SIZE * sizeof(struct edge_struct);

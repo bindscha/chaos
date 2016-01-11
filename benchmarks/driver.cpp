@@ -20,8 +20,9 @@
 #include "../utils/boost_log_wrapper.h"
 // Core
 #ifdef PYTHON_SUPPORT
-  #include "../core/sg_driver_python.hpp"
+#include "../core/sg_driver_python.hpp"
 #else
+
 #include "../core/sg_driver.hpp"
 //#include "../core/sg_driver_async.hpp"
 #endif
@@ -67,31 +68,30 @@
 //#include "../algorithms/bc/bc.hpp"
 
 // Macros to keep things clean
-#define ADD_ALGORITHM(_cmd, _class, _type, _xscale)			\
-  else if((vm["benchmark"].as<std::string>() == #_cmd) &&		\
-	  (vm.count("x_scale") > 0 ? (_xscale):!(_xscale)) &&		\
-	  (pt.get<unsigned long>("graph.type") == (_type)))		\
-    (*(new _class<format::type##_type::format_utils>()))()		\
+#define ADD_ALGORITHM(_cmd, _class, _type, _xscale)      \
+  else if((vm["benchmark"].as<std::string>() == #_cmd) &&    \
+    (vm.count("x_scale") > 0 ? (_xscale):!(_xscale)) &&    \
+    (pt.get<unsigned long>("graph.type") == (_type)))    \
+    (*(new _class<format::type##_type::format_utils>()))()    \
 
 
-#define ADD_SG_ALGORITHM(_cmd, _class, _type, _xscale)			\
-  else if((vm["benchmark"].as<std::string>() == #_cmd) &&		\
-	  (vm.count("x_scale") > 0 ? (_xscale):!(_xscale)) &&		\
-	  (pt.get<unsigned long>("graph.type") == (_type)))		\
-    (*(new								\
+#define ADD_SG_ALGORITHM(_cmd, _class, _type, _xscale)      \
+  else if((vm["benchmark"].as<std::string>() == #_cmd) &&    \
+    (vm.count("x_scale") > 0 ? (_xscale):!(_xscale)) &&    \
+    (pt.get<unsigned long>("graph.type") == (_type)))    \
+    (*(new                \
        algorithm::scatter_gather<_class<format::type##_type::format_utils> , \
        format::type##_type::format_utils>()))()
 
-#define ADD_SGASYNC_ALGORITHM(_cmd, _class, _type, _xscale)		\
-  else if((vm["benchmark"].as<std::string>() == #_cmd) &&		\
-    	  (vm.count("x_scale") > 0 ? (_xscale):!(_xscale)) &&		\
-	  (pt.get<unsigned long>("graph.type") == (_type)))		\
-    (*(new								\
+#define ADD_SGASYNC_ALGORITHM(_cmd, _class, _type, _xscale)    \
+  else if((vm["benchmark"].as<std::string>() == #_cmd) &&    \
+        (vm.count("x_scale") > 0 ? (_xscale):!(_xscale)) &&    \
+    (pt.get<unsigned long>("graph.type") == (_type)))    \
+    (*(new                \
        algorithm::async_scatter_gather<_class<format::type##_type::format_utils> , \
        format::type##_type::format_utils>()))()
 
-int main(int argc, const char* argv[])
-{
+int main(int argc, const char *argv[]) {
   /* Parse the cmd line */
   setup_options(argc, argv);
 
@@ -110,22 +110,23 @@ int main(int argc, const char* argv[])
   /* Read in slipstore information */
   init_slipstore_desc();
 
-  unsigned long blocked_memory = vm["blocked_memory"].as<unsigned long>();
+  unsigned long blocked_memory = vm["blocked_memory"].as < unsigned
+  long > ();
 
-  if(blocked_memory > 0) {
-    BOOST_LOG_TRIVIAL(info) << clock::timestamp() 
-			    << " Blocking memory amount " 
-			    << blocked_memory;
-    (void)map_anon_memory(blocked_memory, true, "Blockmem");
-    BOOST_LOG_TRIVIAL(info) << clock::timestamp() 
-			    << " Done blocking memory";
+  if (blocked_memory > 0) {
+    BOOST_LOG_TRIVIAL(info) << clock::timestamp()
+    << " Blocking memory amount "
+    << blocked_memory;
+    (void) map_anon_memory(blocked_memory, true, "Blockmem");
+    BOOST_LOG_TRIVIAL(info) << clock::timestamp()
+    << " Done blocking memory";
   }
 
   /* Only certain combinations of algorithms and formats
    * are supported. This is encoded below.
    * Algorithms that require the edge value cannot use format type2
    */
-  if(false);
+  if (false);
   ADD_SG_ALGORITHM(bfs, algorithm::sg_simple::bfs, 1, false);
   ADD_SG_ALGORITHM(bfs, algorithm::sg_simple::bfs, 2, false);
   ///ADD_SGASYNC_ALGORITHM(bfs_async, algorithm::sg_simple::bfs_async, 1, false);
@@ -173,8 +174,10 @@ int main(int argc, const char* argv[])
   //ADD_ALGORITHM(belief_propagation, algorithm::belief_prop::standard::belief_propagation, 1, false);
   //ADD_ALGORITHM(belief_propagation_graphchi, algorithm::belief_prop::graphchi::belief_propagation_graphchi, 1, false);
   //ADD_ALGORITHM(belief_propagation_graphchi, algorithm::belief_prop::graphchi::belief_propagation_graphchi, 2, false);
-  ADD_ALGORITHM(belief_propagation_graphchi_new, algorithm::belief_prop::graphchi_new::belief_propagation_graphchi, 1, false);
-  ADD_ALGORITHM(belief_propagation_graphchi_new, algorithm::belief_prop::graphchi_new::belief_propagation_graphchi, 2, false);
+  ADD_ALGORITHM(belief_propagation_graphchi_new, algorithm::belief_prop::graphchi_new::belief_propagation_graphchi, 1,
+                false);
+  ADD_ALGORITHM(belief_propagation_graphchi_new, algorithm::belief_prop::graphchi_new::belief_propagation_graphchi, 2,
+                false);
   ADD_ALGORITHM(mcst, algorithm::mcst::mcst, 1, false);
   ADD_SG_ALGORITHM(hyperanf, algorithm::sg_simple::hyperanf, 1, false);
   ADD_SG_ALGORITHM(hyperanf, algorithm::sg_simple::hyperanf, 2, false);
@@ -188,8 +191,8 @@ int main(int argc, const char* argv[])
 
   else {
     BOOST_LOG_TRIVIAL(fatal) << "Don't know how to run " <<
-      vm["benchmark"].as<std::string>() << 
-      " on " << vm["graph"].as<std::string>();
+    vm["benchmark"].as<std::string>() <<
+    " on " << vm["graph"].as<std::string>();
     exit(-1);
   }
   BOOST_LOG_TRIVIAL(info) << "SHUTDOWN";

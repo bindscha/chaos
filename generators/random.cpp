@@ -25,11 +25,10 @@
 #include "prng/splittable_mrg.h"
 #include "prng/utils.h"
 
-inline static vertex_t generate_vertex(mrg_state* pstate, const vertex_t nvertices)
-{
+inline static vertex_t generate_vertex(mrg_state *pstate, const vertex_t nvertices) {
   /* Generate a pseudorandom number in the range [0, vertices) without modulo bias. */
   vertex_t limit = VT_MAX % nvertices;
-  vertex_t v;  
+  vertex_t v;
 
   do {
     v = mrg_get_uint_orig(pstate);
@@ -40,14 +39,12 @@ inline static vertex_t generate_vertex(mrg_state* pstate, const vertex_t nvertic
   return v % nvertices;
 }
 
-static void generate(thread_buffer* buffer, const mrg_state& state, const vertex_t nvertices, 
-                     const edge_t start, const edge_t end, const bool allow_self_loops, const bool symmetric)
-{
-  for (edge_t ei = start; ei < end; ++ei)
-  {
+static void generate(thread_buffer *buffer, const mrg_state &state, const vertex_t nvertices,
+                     const edge_t start, const edge_t end, const bool allow_self_loops, const bool symmetric) {
+  for (edge_t ei = start; ei < end; ++ei) {
     mrg_state new_state = state;
     mrg_skip(&new_state, 0, ei, 0);
-    struct edge_struct* edge = buffer->edge_struct();
+    struct edge_struct *edge = buffer->edge_struct();
     edge->src = generate_vertex(&new_state, nvertices);
     do {
       edge->dst = generate_vertex(&new_state, nvertices);
@@ -56,7 +53,7 @@ static void generate(thread_buffer* buffer, const mrg_state& state, const vertex
     edge->weight = (value_t)mrg_get_double_orig(&new_state);
 #endif
     if (symmetric) {
-      struct edge_struct* reverse_edge = buffer->edge_struct();
+      struct edge_struct *reverse_edge = buffer->edge_struct();
       reverse_edge->src = edge->dst;
       reverse_edge->dst = edge->src;
 #ifdef WEIGHT
@@ -67,14 +64,13 @@ static void generate(thread_buffer* buffer, const mrg_state& state, const vertex
   buffer->flush();
 }
 
-static void generate_bipartite(thread_buffer* buffer, const mrg_state& state, const vertex_t nleft, const vertex_t nvertices,
-                               const edge_t start, const edge_t end, const bool symmetric)
-{
-  for (edge_t ei = start; ei < end; ++ei)
-  {
+static void generate_bipartite(thread_buffer *buffer, const mrg_state &state, const vertex_t nleft,
+                               const vertex_t nvertices,
+                               const edge_t start, const edge_t end, const bool symmetric) {
+  for (edge_t ei = start; ei < end; ++ei) {
     mrg_state new_state = state;
     mrg_skip(&new_state, 0, ei, 0);
-    struct edge_struct* edge = buffer->edge_struct();
+    struct edge_struct *edge = buffer->edge_struct();
     edge->src = generate_vertex(&new_state, nvertices);
     if (edge->src < nleft) {
       edge->dst = nleft + generate_vertex(&new_state, nvertices - nleft);
@@ -85,7 +81,7 @@ static void generate_bipartite(thread_buffer* buffer, const mrg_state& state, co
     edge->weight = (value_t)mrg_get_double_orig(&new_state);
 #endif
     if (symmetric) {
-      struct edge_struct* reverse_edge = buffer->edge_struct();
+      struct edge_struct *reverse_edge = buffer->edge_struct();
       reverse_edge->src = edge->dst;
       reverse_edge->dst = edge->src;
 #ifdef WEIGHT
@@ -96,8 +92,7 @@ static void generate_bipartite(thread_buffer* buffer, const mrg_state& state, co
   buffer->flush();
 }
 
-int main(int argc, char** argv)
-{
+int main(int argc, char **argv) {
   struct options options;
   if (process_options(argc, argv, false, &options) != 0)
     return 0;
@@ -130,23 +125,23 @@ int main(int argc, char** argv)
   // worker threads
   int nthreads = options.global.nthreads;
   edge_t edges_per_thread = options.erdos_renyi.edges / nthreads;
-  threadid_t* workers[nthreads];
-  boost::thread* worker_threads[nthreads];
+  threadid_t *workers[nthreads];
+  boost::thread *worker_threads[nthreads];
   for (int i = 0; i < nthreads; i++) {
     workers[i] = new threadid_t(i);
-    thread_buffer* buffer = manager.register_thread(*workers[i]);
+    thread_buffer *buffer = manager.register_thread(*workers[i]);
     // last thread gets the remainder (if any)
     edge_t start = i * edges_per_thread;
-    edge_t end = (i == nthreads-1) ? (options.erdos_renyi.edges) : ((i+1) * edges_per_thread);
+    edge_t end = (i == nthreads - 1) ? (options.erdos_renyi.edges) : ((i + 1) * edges_per_thread);
     if (options.erdos_renyi.bipartite) {
       worker_threads[i] = new boost::thread(
-        generate_bipartite, buffer,
-        state, options.erdos_renyi.bipartite, options.erdos_renyi.vertices, start, end, options.global.symmetric
+          generate_bipartite, buffer,
+          state, options.erdos_renyi.bipartite, options.erdos_renyi.vertices, start, end, options.global.symmetric
       );
     } else {
       worker_threads[i] = new boost::thread(
-        generate, buffer,
-        state, options.erdos_renyi.vertices, start, end, options.erdos_renyi.self_loops, options.global.symmetric
+          generate, buffer,
+          state, options.erdos_renyi.vertices, start, end, options.erdos_renyi.self_loops, options.global.symmetric
       );
     }
   }
@@ -165,7 +160,7 @@ int main(int argc, char** argv)
     delete workers[i];
   }
 
-  double elapsed = get_time() - start;  
+  double elapsed = get_time() - start;
   printf("Generation time: %fs\n", elapsed);
 
   make_ini_file(options.global.graphname.c_str(), options.erdos_renyi.vertices, total_edges);

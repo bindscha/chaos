@@ -22,8 +22,7 @@
 /* Reverse bits in a number; this should be optimized for performance
  * (including using bit- or byte-reverse intrinsics if your platform has them).
  */
-static inline uint64_t bitreverse(uint64_t x)
-{
+static inline uint64_t bitreverse(uint64_t x) {
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)
 #define USE_GCC_BYTESWAP /* __builtin_bswap* are in 4.3 but not 4.2 */
 #endif
@@ -63,7 +62,7 @@ static inline uint64_t bitreverse(uint64_t x)
   l = ((l >> 2) & UINT32_C(0x33333333)) | ((l & UINT32_C(0x33333333)) << 2);
   h = ((h >> 1) & UINT32_C(0x55555555)) | ((h & UINT32_C(0x55555555)) << 1);
   l = ((l >> 1) & UINT32_C(0x55555555)) | ((l & UINT32_C(0x55555555)) << 1);
-  return ((uint64_t)l << 32) | h; /* Swap halves */
+  return ((uint64_t) l << 32) | h; /* Swap halves */
 
 #endif
 }
@@ -71,17 +70,16 @@ static inline uint64_t bitreverse(uint64_t x)
 /* Apply a permutation to scramble vertex numbers; a randomly generated
  * permutation is not used because applying it at scale is too expensive.
  */
-inline int64_t scramble(int64_t v0, int lgN, uint64_t val0, uint64_t val1)
-{
-  uint64_t v = (uint64_t)v0;
+inline int64_t scramble(int64_t v0, int lgN, uint64_t val0, uint64_t val1) {
+  uint64_t v = (uint64_t) v0;
   v += val0 + val1;
   v *= (val0 | UINT64_C(0x4519840211493211));
   v = (bitreverse(v) >> (64 - lgN));
-  assert ((v >> lgN) == 0);
+  assert((v >> lgN) == 0);
   v *= (val1 | UINT64_C(0x3050852102C843A5));
   v = (bitreverse(v) >> (64 - lgN));
-  assert ((v >> lgN) == 0);
-  return (int64_t)v;
+  assert((v >> lgN) == 0);
+  return (int64_t) v;
 }
 
 #endif

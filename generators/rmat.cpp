@@ -25,16 +25,14 @@
 #include "prng/splittable_mrg.h"
 #include "prng/utils.h"
 
-static void generate_edge(mrg_state* pstate, const int scale,
+static void generate_edge(mrg_state *pstate, const int scale,
                           double a, double b, double c, double d,
-                          struct edge_struct* edge)
-{
+                          struct edge_struct *edge) {
   vertex_t i = 0, j = 0;
-  vertex_t bit = (vertex_t)1 << (scale-1);
+  vertex_t bit = (vertex_t) 1 << (scale - 1);
 
-  while (true)
-  {
-    double r  = mrg_get_double_orig(pstate);
+  while (true) {
+    double r = mrg_get_double_orig(pstate);
     if (r > a) {               /* outside quadrant 1 */
       if (r <= a + b)          /* in quadrant 2 */
         j |= bit;
@@ -45,7 +43,7 @@ static void generate_edge(mrg_state* pstate, const int scale,
         i |= bit;
       }
     }
-    
+
     if (1 == bit) break;
 
     /*
@@ -72,7 +70,7 @@ static void generate_edge(mrg_state* pstate, const int scale,
     /* Iterates scale times. */
     bit >>= 1;
   }
-  
+
   edge->src = i;
   edge->dst = j;
 #ifdef WEIGHT
@@ -81,23 +79,22 @@ static void generate_edge(mrg_state* pstate, const int scale,
 }
 
 // ugly, but max 10 args to functions allowed in boost::thread
-static unsigned int xscale_interval; 
+static unsigned int xscale_interval;
 static unsigned int xscale_node;
-static void generate(thread_buffer* buffer, const mrg_state& state, const int
-		     scale, const edge_t start, const edge_t end,
+
+static void generate(thread_buffer *buffer, const mrg_state &state, const int
+scale, const edge_t start, const edge_t end,
                      const double a, const double b, const double c, /*const
-                     double d,*/ const bool symmetric)
-{
+                     double d,*/ const bool symmetric) {
   const double d = 1 - (a + b + c);
-  for (edge_t ei = start; ei < end; ++ei)
-  {
-    if(ei%xscale_interval != xscale_node) {continue;}
+  for (edge_t ei = start; ei < end; ++ei) {
+    if (ei % xscale_interval != xscale_node) { continue; }
     mrg_state new_state = state;
     mrg_skip(&new_state, 0, ei, 0);
-    struct edge_struct* edge = buffer->edge_struct();
+    struct edge_struct *edge = buffer->edge_struct();
     generate_edge(&new_state, scale, a, b, c, d, edge);
     if (symmetric) {
-      struct edge_struct* reverse_edge = buffer->edge_struct();
+      struct edge_struct *reverse_edge = buffer->edge_struct();
       reverse_edge->src = edge->dst;
       reverse_edge->dst = edge->src;
 #ifdef WEIGHT
@@ -108,8 +105,7 @@ static void generate(thread_buffer* buffer, const mrg_state& state, const int
   buffer->flush();
 }
 
-int main(int argc, char** argv)
-{
+int main(int argc, char **argv) {
   struct options options;
   if (process_options(argc, argv, true, &options) != 0)
     return 0;
@@ -119,8 +115,8 @@ int main(int argc, char** argv)
     return 0;
   }
   double d = 1 - (options.rmat.a + options.rmat.b + options.rmat.c);
-  xscale_node     = options.rmat.xscale_node;
-  xscale_interval = options.rmat.xscale_interval; 
+  xscale_node = options.rmat.xscale_node;
+  xscale_interval = options.rmat.xscale_interval;
   uint_fast32_t seed[5];
   make_mrg_seed(options.rng.userseed1, options.rng.userseed2, seed);
   mrg_state state;
@@ -128,20 +124,20 @@ int main(int argc, char** argv)
   //mrg_skip(&new_state, 50, 7, 0); // Do an initial skip?
 
   edge_t total_edges = options.rmat.edges;
-  if((total_edges % options.rmat.xscale_interval) > options.rmat.xscale_node) {
+  if ((total_edges % options.rmat.xscale_interval) > options.rmat.xscale_node) {
     total_edges /= options.rmat.xscale_interval;
     total_edges++;
   }
   else {
     total_edges /= options.rmat.xscale_interval;
   }
-  
+
   if (options.global.symmetric) {
     total_edges *= 2;
   }
 
   printf("Generator type: R-MAT\n");
-  printf("Scale: %d (%" PRIu64 " vertices)\n", options.rmat.scale, ((uint64_t)1 << options.rmat.scale));
+  printf("Scale: %d (%" PRIu64 " vertices)\n", options.rmat.scale, ((uint64_t) 1 << options.rmat.scale));
   printf("Edges: %" PRIet "\n", total_edges);
   printf("Probabilities: A=%4.2f, B=%4.2f, C=%4.2f, D=%4.2f\n", options.rmat.a, options.rmat.b, options.rmat.c, d);
 
@@ -153,22 +149,22 @@ int main(int argc, char** argv)
   buffer_manager manager(&flushq, options.global.buffers_per_thread, buffer_size);
   io_thread_func io_func(options.global.graphname.c_str(), total_edges, &flushq, &manager, buffer_size);
   boost::thread io_thread(boost::ref(io_func));
-  
+
   // worker threads
   int nthreads = options.global.nthreads;
-  edge_t edges_per_thread = options.rmat.edges / nthreads;  
-  threadid_t* workers[nthreads];
-  boost::thread* worker_threads[nthreads];
+  edge_t edges_per_thread = options.rmat.edges / nthreads;
+  threadid_t *workers[nthreads];
+  boost::thread *worker_threads[nthreads];
   for (int i = 0; i < nthreads; i++) {
     workers[i] = new threadid_t(i);
-    thread_buffer* buffer = manager.register_thread(*workers[i]);
+    thread_buffer *buffer = manager.register_thread(*workers[i]);
     // last thread gets the remainder (if any)
     edge_t start = i * edges_per_thread;
-    edge_t end = (i == nthreads-1) ? (options.rmat.edges) : ((i+1) * edges_per_thread);
+    edge_t end = (i == nthreads - 1) ? (options.rmat.edges) : ((i + 1) * edges_per_thread);
     worker_threads[i] = new boost::thread(generate, buffer,
-					  state, options.rmat.scale, start, end,
-					  options.rmat.a, options.rmat.b, options.rmat.c, /*d,*/
-					  options.global.symmetric);
+                                          state, options.rmat.scale, start, end,
+                                          options.rmat.a, options.rmat.b, options.rmat.c, /*d,*/
+                                          options.global.symmetric);
   }
 
   // Wait until work completes
@@ -188,7 +184,7 @@ int main(int argc, char** argv)
   double elapsed = get_time() - start;
   printf("Generation time: %fs\n", elapsed);
 
-  make_ini_file(options.global.graphname.c_str(), (uint64_t)1 << options.rmat.scale, total_edges);
+  make_ini_file(options.global.graphname.c_str(), (uint64_t) 1 << options.rmat.scale, total_edges);
 
   return 0;
 }

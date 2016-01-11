@@ -10,12 +10,14 @@
 #ifndef __STDC_CONSTANT_MACROS
 #define __STDC_CONSTANT_MACROS
 #endif
+
 #include "splittable_mrg.h"
 #include <stdint.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+
 #ifdef __MTA__
 #include <sys/mta_task.h>
 #endif
@@ -25,11 +27,12 @@
 #ifdef GRAPH_GENERATOR_OMP
 #include <omp.h>
 #endif
+
 #include "utils.h"
 
 /* Spread the two 64-bit numbers into five nonzero values in the correct
  * range. */
-void make_mrg_seed(uint64_t userseed1, uint64_t userseed2, uint_fast32_t* seed) {
+void make_mrg_seed(uint64_t userseed1, uint64_t userseed2, uint_fast32_t *seed) {
   seed[0] = (userseed1 & 0x3FFFFFFF) + 1;
   seed[1] = ((userseed1 >> 30) & 0x3FFFFFFF) + 1;
   seed[2] = (userseed2 & 0x3FFFFFFF) + 1;

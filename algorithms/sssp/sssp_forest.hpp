@@ -18,200 +18,183 @@
 
 #ifndef _SSSP_FOREST_
 #define _SSSP_FOREST_
+
 #include "../../utils/options_utils.h"
 #include "../../core/x-lib.hpp"
 #include <limits>
 
 namespace algorithm {
   namespace sg_simple {
-    template <typename F>
+    template<typename F>
     class sssp_forest {
     public:
-      static unsigned long checkpoint_size()
-      {
-	return 0;
-      }
+        static unsigned long checkpoint_size() {
+          return 0;
+        }
 
-      static void take_checkpoint(unsigned char* buffer,
-				  per_processor_data ** cpu_array,
-				  unsigned long num_processors)
-      {
-      }
+        static void take_checkpoint(unsigned char *buffer,
+                                    per_processor_data **cpu_array,
+                                    unsigned long num_processors) {
+        }
 
-      static void restore_checkpoint(unsigned char* buffer,
-				     per_processor_data ** cpu_array,
-				     unsigned long num_processors)
-      {
-      }
-      
-      struct vertex {
-	vertex_t component;
-	vertex_t predecessor;
-	weight_t distance;
-	unsigned long active_phase;
-      } __attribute__((__packed__));
+        static void restore_checkpoint(unsigned char *buffer,
+                                       per_processor_data **cpu_array,
+                                       unsigned long num_processors) {
+        }
 
-      struct update {
-	vertex_t target;
-	vertex_t predecessor;
-	weight_t distance;
-	vertex_t component;
-      } __attribute__((__packed__));
+        struct vertex {
+            vertex_t component;
+            vertex_t predecessor;
+            weight_t distance;
+            unsigned long active_phase;
+        } __attribute__((__packed__));
 
-      static unsigned long vertex_state_bytes() {
-	return sizeof(struct vertex);
-      }
-      static unsigned long split_size_bytes() {
-	return sizeof(struct update);
-      }
+        struct update {
+            vertex_t target;
+            vertex_t predecessor;
+            weight_t distance;
+            vertex_t component;
+        } __attribute__((__packed__));
 
-      static unsigned long split_key(unsigned char* buffer, unsigned long jump)
-      {
-	struct update* u = (struct update*)buffer;
-	vertex_t key = u->target;
-	key = key >> jump;
-	return key;
-      }
+        static unsigned long vertex_state_bytes() {
+          return sizeof(struct vertex);
+        }
 
-      static
-      bool need_data_barrier()
-      {
-	return false;
-      }
+        static unsigned long split_size_bytes() {
+          return sizeof(struct update);
+        }
 
-      class db_sync {
-      public:
-	void prep_db_data(per_processor_data **pcpu_array,
-			  unsigned long me,
-			  unsigned long processors)
-	{}
+        static unsigned long split_key(unsigned char *buffer, unsigned long jump) {
+          struct update *u = (struct update *) buffer;
+          vertex_t key = u->target;
+          key = key >> jump;
+          return key;
+        }
 
-	void finalize_db_data(per_processor_data **pcpu_array,
-			      unsigned long me,
-			      unsigned long processors)
-	{}
-	
-	unsigned char *db_buffer() 
-	{return NULL;}
+        static
+        bool need_data_barrier() {
+          return false;
+        }
 
-	unsigned long db_size()
-	{ return 0;}
+        class db_sync {
+        public:
+            void prep_db_data(per_processor_data **pcpu_array,
+                              unsigned long me,
+                              unsigned long processors) { }
 
-	void db_generate()
-	{}
+            void finalize_db_data(per_processor_data **pcpu_array,
+                                  unsigned long me,
+                                  unsigned long processors) { }
 
-	void db_merge()
-	{}
+            unsigned char *db_buffer() { return NULL; }
 
-	void db_absorb()
-	{}
-      };
-      
-      static
-      db_sync * get_db_sync() {return NULL;}
+            unsigned long db_size() { return 0; }
 
-      static bool need_scatter_merge(unsigned long bsp_phase)
-      {
-	return false;
-      }
+            void db_generate() { }
 
-      static void vertex_apply(unsigned char *v,
-			       unsigned char *copy,
-			       unsigned long copy_machine,
-			       per_processor_data *per_cpu_data,
-			       unsigned long bsp_phase)
-      {
-	struct vertex *vtx     = (struct vertex *)v;
-	struct vertex *vtx_cpy = (struct vertex *)copy;
-	if(vtx->component > vtx_cpy->component ||
-	   (vtx->component == vtx_cpy->component &&
-	    vtx->distance  > vtx_cpy->distance)) {
-	  vtx->component   = vtx_cpy->component;
-	  vtx->predecessor = vtx_cpy->predecessor;
-	  vtx->distance    = vtx_cpy->distance;
-	  vtx->active_phase = bsp_phase;
-	}
-      }
+            void db_merge() { }
 
-      static bool init(unsigned char* vertex_state,
-		       unsigned long vertex_index,
-		       unsigned long bsp_phase,
-		       per_processor_data *cpu_state)
-      {
-	struct vertex* vertices    = (struct vertex*)vertex_state;
-	vertices->component        = vertex_index;
-	vertices->predecessor      = vertices->component;
-	vertices->distance         = 0;
-	vertices->active_phase     = 0;
-	return true;
-      }
+            void db_absorb() { }
+        };
 
-      static bool need_init(unsigned long bsp_phase)
-      {
-	return (bsp_phase == 0);
-      }
+        static
+        db_sync *get_db_sync() { return NULL; }
 
-      static bool apply_one_update(unsigned char* vertex_state,
-				   unsigned char* update_stream,
-				   per_processor_data *per_cpu_data,
-				   bool local_tile,
-				   unsigned long bsp_phase)
-      {
-	struct update* u = (struct update*)update_stream;
-	struct vertex* vertices = (struct vertex*)vertex_state;
-	struct vertex* v = &vertices[x_lib::configuration::map_offset(u->target)];
-	if ((u->component < v->component)||
-	    (u->component == v->component &&
-	     u->distance < v->distance)) {
-	  v->predecessor  = u->predecessor;
-	  v->distance     = u->distance;
-	  v->active_phase = bsp_phase;
-	  v->component    = u->component;
-	  return true;
-	} else {
-	  return false;
-	}
-      }
+        static bool need_scatter_merge(unsigned long bsp_phase) {
+          return false;
+        }
 
-      static bool generate_update(unsigned char* vertex_state,
-				  unsigned char* edge_format,
-				  unsigned char* update_stream,
-				  per_processor_data *per_cpu_data,
-				  bool local_tile,
-				  unsigned long bsp_phase)
-      {
-	vertex_t src, dst;
-	weight_t edge_distance;
-	F::read_edge(edge_format, src, dst, edge_distance);
-	struct vertex* vertices = (struct vertex*)vertex_state;
-	struct vertex* v = &vertices[x_lib::configuration::map_offset(src)];
-	if(v->active_phase == bsp_phase) {
-	  struct update* u = (struct update*)update_stream;
-	  u->target        = dst;
-	  u->predecessor   = src;
-	  u->distance      = v->distance + edge_distance;
-	  u->component     = v->component;
-	  return true;
-	} else {
-	  return false;
-	}
-      }
+        static void vertex_apply(unsigned char *v,
+                                 unsigned char *copy,
+                                 unsigned long copy_machine,
+                                 per_processor_data *per_cpu_data,
+                                 unsigned long bsp_phase) {
+          struct vertex *vtx = (struct vertex *) v;
+          struct vertex *vtx_cpy = (struct vertex *) copy;
+          if (vtx->component > vtx_cpy->component ||
+              (vtx->component == vtx_cpy->component &&
+               vtx->distance > vtx_cpy->distance)) {
+            vtx->component = vtx_cpy->component;
+            vtx->predecessor = vtx_cpy->predecessor;
+            vtx->distance = vtx_cpy->distance;
+            vtx->active_phase = bsp_phase;
+          }
+        }
 
-      // not used
-      static void postprocessing() {}
-      static void preprocessing() {}
+        static bool init(unsigned char *vertex_state,
+                         unsigned long vertex_index,
+                         unsigned long bsp_phase,
+                         per_processor_data *cpu_state) {
+          struct vertex *vertices = (struct vertex *) vertex_state;
+          vertices->component = vertex_index;
+          vertices->predecessor = vertices->component;
+          vertices->distance = 0;
+          vertices->active_phase = 0;
+          return true;
+        }
 
-      static per_processor_data * 
-      create_per_processor_data(unsigned long processor_id,
-				unsigned long machines)
-      {
-	return NULL;
-      }
+        static bool need_init(unsigned long bsp_phase) {
+          return (bsp_phase == 0);
+        }
 
-      static unsigned long min_super_phases()
-      {
-	return 1;
-      }
+        static bool apply_one_update(unsigned char *vertex_state,
+                                     unsigned char *update_stream,
+                                     per_processor_data *per_cpu_data,
+                                     bool local_tile,
+                                     unsigned long bsp_phase) {
+          struct update *u = (struct update *) update_stream;
+          struct vertex *vertices = (struct vertex *) vertex_state;
+          struct vertex *v = &vertices[x_lib::configuration::map_offset(u->target)];
+          if ((u->component < v->component) ||
+              (u->component == v->component &&
+               u->distance < v->distance)) {
+            v->predecessor = u->predecessor;
+            v->distance = u->distance;
+            v->active_phase = bsp_phase;
+            v->component = u->component;
+            return true;
+          } else {
+            return false;
+          }
+        }
+
+        static bool generate_update(unsigned char *vertex_state,
+                                    unsigned char *edge_format,
+                                    unsigned char *update_stream,
+                                    per_processor_data *per_cpu_data,
+                                    bool local_tile,
+                                    unsigned long bsp_phase) {
+          vertex_t src, dst;
+          weight_t edge_distance;
+          F::read_edge(edge_format, src, dst, edge_distance);
+          struct vertex *vertices = (struct vertex *) vertex_state;
+          struct vertex *v = &vertices[x_lib::configuration::map_offset(src)];
+          if (v->active_phase == bsp_phase) {
+            struct update *u = (struct update *) update_stream;
+            u->target = dst;
+            u->predecessor = src;
+            u->distance = v->distance + edge_distance;
+            u->component = v->component;
+            return true;
+          } else {
+            return false;
+          }
+        }
+
+        // not used
+        static void postprocessing() { }
+
+        static void preprocessing() { }
+
+        static per_processor_data *
+        create_per_processor_data(unsigned long processor_id,
+                                  unsigned long machines) {
+          return NULL;
+        }
+
+        static unsigned long min_super_phases() {
+          return 1;
+        }
 
     };
   }

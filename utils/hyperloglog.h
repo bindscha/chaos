@@ -18,6 +18,7 @@
 
 #ifndef _HYPER_LOG_LOG_
 #define _HYPER_LOG_LOG_
+
 #include<boost/assert.hpp>
 #include "boost_log_wrapper.h"
 // An implementation of hyper log log counters
@@ -33,91 +34,111 @@
 // This structure is populated with key parameter necessary to access the
 // counters
 struct hyper_log_log_params {
-  float rsd;                     // desired relative standard deviation
-  unsigned int log2_m;           // Log of register count
-  unsigned int m_minus_1;        // Mask to get register index
-  float alphaMM;
-  float small_cnt_threshold;     // Threshold for small counts
-  float *small_cnt_lookup;        // lookup table for small counts
+    float rsd;                     // desired relative standard deviation
+    unsigned int log2_m;           // Log of register count
+    unsigned int m_minus_1;        // Mask to get register index
+    float alphaMM;
+    float small_cnt_threshold;     // Threshold for small counts
+    float *small_cnt_lookup;        // lookup table for small counts
 };
 
 static void setup_hll_params(hyper_log_log_params *params,
-			     float rsd) // rsd == relative standard deviation
+                             float rsd) // rsd == relative standard deviation
 {
   params->rsd = rsd;
   params->log2_m =
-    (int)ceil(log2((1.106/rsd)*(1.106/rsd)));
+      (int) ceil(log2((1.106 / rsd) * (1.106 / rsd)));
   params->m_minus_1 = ((1 << params->log2_m) - 1);
   unsigned int m = params->m_minus_1 + 1;
-  params->small_cnt_lookup = (float *)malloc(m*sizeof(float));
-  for(unsigned long i=0;i<m;i++) {
-    params->small_cnt_lookup[i] = m*logf(((float)m)/(i+1));
+  params->small_cnt_lookup = (float *) malloc(m * sizeof(float));
+  for (unsigned long i = 0; i < m; i++) {
+    params->small_cnt_lookup[i] = m * logf(((float) m) / (i + 1));
   }
-  switch(params->log2_m) {
-  case 4:
-    params->alphaMM = 0.673 * m * m;
-    break;
-  case 5:
-    params->alphaMM = 0.697 * m * m;
-    break;
-  case 6:
-    params->alphaMM = 0.709 * m * m;
-    break;
-  default:
-    params->alphaMM = (0.7213 /(1 + 1.079/m)) * m * m;
-    break;
+  switch (params->log2_m) {
+    case 4:
+      params->alphaMM = 0.673 * m * m;
+      break;
+    case 5:
+      params->alphaMM = 0.697 * m * m;
+      break;
+    case 6:
+      params->alphaMM = 0.709 * m * m;
+      break;
+    default:
+      params->alphaMM = (0.7213 / (1 + 1.079 / m)) * m * m;
+      break;
   }
-  params->small_cnt_threshold = (5.0f)*(params->m_minus_1 + 1)/2;
-  params->small_cnt_threshold = params->alphaMM/params->small_cnt_threshold;
+  params->small_cnt_threshold = (5.0f) * (params->m_minus_1 + 1) / 2;
+  params->small_cnt_threshold = params->alphaMM / params->small_cnt_threshold;
 }
 
-static void print_hll_params(hyper_log_log_params *param)
-{
-  BOOST_LOG_TRIVIAL(info) << "HLL::PARAMS::rsd " << 
-    param->rsd;
-  BOOST_LOG_TRIVIAL(info) << "HLL::PARAMS::alphaMM " << 
-    param->alphaMM;
-  BOOST_LOG_TRIVIAL(info) << "HLL::PARAMS::counters " << 
-    (param->m_minus_1 + 1);
+static void print_hll_params(hyper_log_log_params *param) {
+  BOOST_LOG_TRIVIAL(info) << "HLL::PARAMS::rsd " <<
+  param->rsd;
+  BOOST_LOG_TRIVIAL(info) << "HLL::PARAMS::alphaMM " <<
+  param->alphaMM;
+  BOOST_LOG_TRIVIAL(info) << "HLL::PARAMS::counters " <<
+  (param->m_minus_1 + 1);
 }
 
-static int sizeof_hll_counter(hyper_log_log_params *param)
-{
+static int sizeof_hll_counter(hyper_log_log_params *param) {
   return (1 << param->log2_m);
 }
 
-unsigned long jenkins(unsigned long x, unsigned long seed)
-{
+unsigned long jenkins(unsigned long x, unsigned long seed) {
   unsigned long a, b, c;
   /* Set up the internal state */
   a = seed + x;
   b = seed;
   c = 0x9e3779b97f4a7c13L; /* the golden ratio; an arbitrary value */
-  a -= b; a -= c; a ^= (c >> 43);
-  b -= c; b -= a; b ^= (a << 9);
-  c -= a; c -= b; c ^= (b >> 8);
-  a -= b; a -= c; a ^= (c >> 38);
-  b -= c; b -= a; b ^= (a << 23);
-  c -= a; c -= b; c ^= (b >> 5);
-  a -= b; a -= c; a ^= (c >> 35);
-  b -= c; b -= a; b ^= (a << 49);
-  c -= a; c -= b; c ^= (b >> 11);
-  a -= b; a -= c; a ^= (c >> 12);
-  b -= c; b -= a; b ^= (a << 18);
-  c -= a; c -= b; c ^= (b >> 22);
+  a -= b;
+  a -= c;
+  a ^= (c >> 43);
+  b -= c;
+  b -= a;
+  b ^= (a << 9);
+  c -= a;
+  c -= b;
+  c ^= (b >> 8);
+  a -= b;
+  a -= c;
+  a ^= (c >> 38);
+  b -= c;
+  b -= a;
+  b ^= (a << 23);
+  c -= a;
+  c -= b;
+  c ^= (b >> 5);
+  a -= b;
+  a -= c;
+  a ^= (c >> 35);
+  b -= c;
+  b -= a;
+  b ^= (a << 49);
+  c -= a;
+  c -= b;
+  c ^= (b >> 11);
+  a -= b;
+  a -= c;
+  a ^= (c >> 12);
+  b -= c;
+  b -= a;
+  b ^= (a << 18);
+  c -= a;
+  c -= b;
+  c ^= (b >> 22);
   return c;
 }
 
 // Count an item
 static void add_hll_counter(hyper_log_log_params *param,
-			    unsigned char *counter, 
-			    unsigned long hash)
-{
-  unsigned int index  = hash & param->m_minus_1;
+                            unsigned char *counter,
+                            unsigned long hash) {
+  unsigned int index = hash & param->m_minus_1;
   unsigned char value = counter[index];
   unsigned char new_value = __builtin_ffs(hash >> param->log2_m);
   // Note: with an 8 bit counter new_value + 1 must fit
-  if(new_value > value) {
+  if (new_value > value) {
     counter[index] = new_value;
   }
 }
@@ -127,8 +148,8 @@ static void add_hll_counter(hyper_log_log_params *param,
 #ifdef __AVX2__
 #define HLL_ALIGN __attribute__((aligned(32)))
 static bool hll_union(unsigned char *counterA, 
-		      unsigned char *counterB,
-		      hyper_log_log_params *param)
+          unsigned char *counterB,
+          hyper_log_log_params *param)
 {
   unsigned int bytes = param->m_minus_1 + 1;
   unsigned int index = 0;
@@ -178,8 +199,8 @@ static bool hll_union(unsigned char *counterA,
 #elif __SSE4_1__
 #define HLL_ALIGN __attribute__((aligned(16)))
 static bool hll_union(unsigned char *counterA, 
-		      unsigned char *counterB,
-		      hyper_log_log_params *param)
+          unsigned char *counterB,
+          hyper_log_log_params *param)
 {
   typedef char v16qi __attribute__((vector_size(16)));
   typedef long long int v2di __attribute__((vector_size(16)));
@@ -215,30 +236,30 @@ static bool hll_union(unsigned char *counterA,
 #else
 #warning "Using slow hyperloglog implementation as no SSE4.1 is available or is disabled"
 #define HLL_ALIGN
-static bool hll_union(unsigned char *counterA, 
-		      unsigned char *counterB,
-		      hyper_log_log_params *param)
-{
+
+static bool hll_union(unsigned char *counterA,
+                      unsigned char *counterB,
+                      hyper_log_log_params *param) {
   bool no_change = true;
-  for(unsigned int i=0;i<= param->m_minus_1;i++) {
-    if(counterA[i] < counterB[i]) {
+  for (unsigned int i = 0; i <= param->m_minus_1; i++) {
+    if (counterA[i] < counterB[i]) {
       no_change = false;
       counterA[i] = counterB[i];
     }
   }
   return !no_change;
 }
+
 #endif
 
 // Return count estimate
 static float count_hll_counter(hyper_log_log_params *param,
-			       unsigned char *counter)
-{
-  float s   = 0;
+                               unsigned char *counter) {
+  float s = 0;
   float tmp = 0;
   unsigned int zeroes = 0;
-  for(unsigned int i=0;i<=param->m_minus_1;i++) {
-    if(counter[i] == 0) {
+  for (unsigned int i = 0; i <= param->m_minus_1; i++) {
+    if (counter[i] == 0) {
       zeroes++;
     }
     unsigned int twiddle = counter[i];
@@ -249,18 +270,17 @@ static float count_hll_counter(hyper_log_log_params *param,
     s += tmp;
   }
   // Small range correction (exactly as in the reference implementation)
-  if(zeroes && s > param->small_cnt_threshold) {
+  if (zeroes && s > param->small_cnt_threshold) {
     s = param->small_cnt_lookup[zeroes - 1];
   }
   else {
-    s = (param->alphaMM/s);
+    s = (param->alphaMM / s);
   }
   return s;
 }
 
 //Initialize counter
-void hll_init(unsigned char *counter, hyper_log_log_params *param)
-{
+void hll_init(unsigned char *counter, hyper_log_log_params *param) {
   memset(counter, 0, sizeof_hll_counter(param));
 }
 

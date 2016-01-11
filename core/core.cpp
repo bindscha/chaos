@@ -22,21 +22,21 @@
 //#include "sg_driver_async.hpp"
 namespace x_lib {
   unsigned long configuration::cached_partitions = 0;
-  unsigned long configuration::partition_shift   = 0;
-  unsigned long configuration::tiles             = 0;
-  unsigned long configuration::tile_shift        = 0;
-  unsigned long configuration::super_partitions  = 0;
+  unsigned long configuration::partition_shift = 0;
+  unsigned long configuration::tiles = 0;
+  unsigned long configuration::tile_shift = 0;
+  unsigned long configuration::super_partitions = 0;
   unsigned long configuration::super_partition_shift = 0;
-  unsigned long configuration::ext_mem_bits   = 0;
-  unsigned long configuration::ext_fanout_bits   = 0;
+  unsigned long configuration::ext_mem_bits = 0;
+  unsigned long configuration::ext_fanout_bits = 0;
   unsigned long map_spshift_wrap::map_spshift = 100;
 
-  x_barrier* x_thread::sync;
+  x_barrier *x_thread::sync;
   volatile bool x_thread::terminate = false;
-  struct work_base * volatile x_thread::work_to_do = NULL;
-  unsigned long ** memory_buffer::aux_index = NULL;
-  unsigned char * memory_buffer::aux_buffer = NULL;
-  memory_buffer * volatile memory_buffer::freelist = NULL;
+  struct work_base *volatile x_thread::work_to_do = NULL;
+  unsigned long **memory_buffer::aux_index = NULL;
+  unsigned char *memory_buffer::aux_buffer = NULL;
+  memory_buffer *volatile memory_buffer::freelist = NULL;
   volatile unsigned long memory_buffer::freelist_lock = 0;
 #ifdef PYTHON_SUPPORT
   PyObject * memory_buffer::auxpBuffer = NULL;
@@ -50,10 +50,10 @@ namespace x_lib {
 namespace algorithm {
   unsigned long sg_pcpu::bsp_phase;
   unsigned long sg_pcpu::current_step;
-  sg_pcpu ** sg_pcpu::per_cpu_array;
+  sg_pcpu **sg_pcpu::per_cpu_array;
   x_barrier *sg_pcpu::sync;
-  x_lib::filter * sg_pcpu::scatter_filter;
-  per_processor_data ** sg_pcpu::algo_pcpu_array;
+  x_lib::filter *sg_pcpu::scatter_filter;
+  per_processor_data **sg_pcpu::algo_pcpu_array;
   bool sg_pcpu::do_algo_reduce;
   //unsigned long sg_async_pcpu::bsp_phase;
   //unsigned long sg_async_pcpu::current_step;
@@ -68,12 +68,12 @@ namespace slipstore {
   slipstore::client_drain *slipstore_client_drain = NULL;
   slipstore::client_barrier *slipstore_client_barrier = NULL;
   slipstore::server *slipstore_server = NULL;
-  slipstore::busy_counter * have_outstanding_request = NULL;
+  slipstore::busy_counter *have_outstanding_request = NULL;
   boost::thread *server_thread = NULL;
   unsigned long baseport = 0;
-  void * zmq_context = NULL;
-  void * zmq_context_data_out = NULL;
-  void * zmq_context_data_in = NULL;
+  void *zmq_context = NULL;
+  void *zmq_context_data_out = NULL;
+  void *zmq_context_data_in = NULL;
   unsigned long quota = 0;
   unsigned long usage = 0;
   unsigned long max_quota_usage = 0;

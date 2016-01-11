@@ -18,29 +18,35 @@
 
 #ifndef _CLOCK_GENERIC_
 #define _CLOCK_GENERIC_
+
 #include<sstream>
 #include<string>
 #include<iostream>
 #include<sys/time.h>
+
 class clock {
 public:
-  virtual void start() = 0;
-  virtual void stop() = 0;
-  virtual void reset() = 0;
-  virtual void print(const char header[]) = 0;
-  virtual unsigned long elapsed_time() = 0;
+    virtual void start() = 0;
 
-  static std::string timestamp()
-  {
-    struct timeval tv;
-    struct tm *now;
-    char buf[64];
+    virtual void stop() = 0;
 
-    gettimeofday(&tv, NULL);
-    now = localtime(&tv.tv_sec);
-    strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", now);
-    std::string str(buf);
-    return str;
-  }
+    virtual void reset() = 0;
+
+    virtual void print(const char header[]) = 0;
+
+    virtual unsigned long elapsed_time() = 0;
+
+    static std::string timestamp() {
+      struct timeval tv;
+      struct tm *now;
+      char buf[64];
+
+      gettimeofday(&tv, NULL);
+      now = localtime(&tv.tv_sec);
+      strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", now);
+      std::string str(buf);
+      return str;
+    }
 };
+
 #endif

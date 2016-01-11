@@ -18,6 +18,7 @@
 
 #ifndef _ALS_
 #define _ALS_
+
 #include "../../utils/options_utils.h"
 #include "../../utils/desc_utils.h"
 #include "../../utils/boost_log_wrapper.h"
@@ -44,267 +45,253 @@ namespace lapack = boost::numeric::bindings::lapack;
 
 namespace algorithm {
   namespace sg_simple {
-    class als_per_processor_data:public per_processor_data {
+    class als_per_processor_data : public per_processor_data {
     public:
-      static double sse;
-      double sse_local;
-      als_per_processor_data() 
-	:sse_local(0.0)
-      {}
-      bool reduce(per_processor_data **per_cpu_array,
-		  unsigned long processors)
-      {
-	sse = 0;
-	for(unsigned long i=0;i<processors;i++) {
-	  als_per_processor_data * data = 
-	    static_cast<als_per_processor_data *>(per_cpu_array[i]);
-	  sse += data->sse_local;
-	  data->sse_local = 0;
-	}
-	return false;
-      }
-    } __attribute__((__aligned__(64))) ;
-  
-    template <typename F>
+        static double sse;
+        double sse_local;
+
+        als_per_processor_data()
+            : sse_local(0.0) { }
+
+        bool reduce(per_processor_data **per_cpu_array,
+                    unsigned long processors) {
+          sse = 0;
+          for (unsigned long i = 0; i < processors; i++) {
+            als_per_processor_data *data =
+                static_cast<als_per_processor_data *>(per_cpu_array[i]);
+            sse += data->sse_local;
+            data->sse_local = 0;
+          }
+          return false;
+        }
+    } __attribute__((__aligned__(64)));
+
+    template<typename F>
     class als_factorization {
-    
+
     private:
 
-      struct vertex {
-	vertex_t degree;
-	vertex_t count;
-	double feature_vec[RANK];
-	double temp_mat[RANK][RANK];
-      } __attribute__((__packed__));
+        struct vertex {
+            vertex_t degree;
+            vertex_t count;
+            double feature_vec[RANK];
+            double temp_mat[RANK][RANK];
+        } __attribute__((__packed__));
 
-      struct update {
-	vertex_t target;
-	double feature_vec[RANK];
-	double rating;
-      } __attribute__((__packed__));
-    
-      static unsigned long niters;
+        struct update {
+            vertex_t target;
+            double feature_vec[RANK];
+            double rating;
+        } __attribute__((__packed__));
 
-      // Helpers
-      static void copy_vector(double src_vec[RANK], double dst_vec[RANK])
-      {
-	for (int i = 0; i < RANK; i++)
-	  dst_vec[i] = src_vec[i];
-      }
-      static void zero_vector(double vec[RANK])
-      {
-	for (int i = 0; i < RANK; i++)
-	  vec[i] = 0;
-      }
-      static void zero_matrix(double mat[RANK][RANK])
-      {
-	for (int i = 0; i < RANK; i++)
-	  for (int j = 0; j < RANK; j++)
-	    mat[i][j] = 0;
-      }
+        static unsigned long niters;
 
-      static void init_vertex(struct vertex& v)
-      {
-	v.degree = 0;
-	v.count = 0;
+        // Helpers
+        static void copy_vector(double src_vec[RANK], double dst_vec[RANK]) {
+          for (int i = 0; i < RANK; i++)
+            dst_vec[i] = src_vec[i];
+        }
 
-	boost::mt19937 generator;
-	boost::uniform_int<> distribution(0, 1000);
-	for (int i = 0; i < RANK; i++)
-	  v.feature_vec[i] =  0.001 * distribution(generator);
-      }
+        static void zero_vector(double vec[RANK]) {
+          for (int i = 0; i < RANK; i++)
+            vec[i] = 0;
+        }
 
-      // Solve the system Ax=b using LAPACK library and boost bindings for it
-      // This has some copying that should somehow be removed
-      static void solve(double mat[RANK][RANK], double vec[RANK])
-      {
-	ublas::matrix<double, ublas::column_major> A(RANK, RANK);
-	ublas::vector<double> b(RANK);
-      
-	for (int i = 0; i < RANK; i++) {
-	  b(i) = vec[i];
-	  for (int j = 0; j < RANK; j++) {
-	    A(i,j) = mat[i][j];
-	  }
-	}
+        static void zero_matrix(double mat[RANK][RANK]) {
+          for (int i = 0; i < RANK; i++)
+            for (int j = 0; j < RANK; j++)
+              mat[i][j] = 0;
+        }
 
-	lapack::gesv(A,b);
+        static void init_vertex(struct vertex &v) {
+          v.degree = 0;
+          v.count = 0;
 
-	for (int i = 0; i < RANK; i++)
-	  vec[i] = b(i);
-      }
+          boost::mt19937 generator;
+          boost::uniform_int<> distribution(0, 1000);
+          for (int i = 0; i < RANK; i++)
+            v.feature_vec[i] = 0.001 * distribution(generator);
+        }
+
+        // Solve the system Ax=b using LAPACK library and boost bindings for it
+        // This has some copying that should somehow be removed
+        static void solve(double mat[RANK][RANK], double vec[RANK]) {
+          ublas::matrix<double, ublas::column_major> A(RANK, RANK);
+          ublas::vector<double> b(RANK);
+
+          for (int i = 0; i < RANK; i++) {
+            b(i) = vec[i];
+            for (int j = 0; j < RANK; j++) {
+              A(i, j) = mat[i][j];
+            }
+          }
+
+          lapack::gesv(A, b);
+
+          for (int i = 0; i < RANK; i++)
+            vec[i] = b(i);
+        }
 
     public:
-      static unsigned long vertex_state_bytes() {
-	return sizeof(struct vertex);
-      }
-      static unsigned long split_size_bytes() {
-	return sizeof(struct update);
-      }
+        static unsigned long vertex_state_bytes() {
+          return sizeof(struct vertex);
+        }
 
-      static unsigned long split_key(unsigned char* buffer, unsigned long jump)
-      {
-	struct update* u = (struct update*)buffer;
-	vertex_t key = u->target;
-	key = key >> jump;
-	return key;
-      }
+        static unsigned long split_size_bytes() {
+          return sizeof(struct update);
+        }
 
-      static bool init(unsigned char* vertex_state,
-		       unsigned long vertex_index,
-		       unsigned long bsp_phase,
-		       per_processor_data *cpu_state)
-      {
-	struct vertex* vertices = (struct vertex*)vertex_state;
-	init_vertex(*vertices);
-	return true;
-      }
+        static unsigned long split_key(unsigned char *buffer, unsigned long jump) {
+          struct update *u = (struct update *) buffer;
+          vertex_t key = u->target;
+          key = key >> jump;
+          return key;
+        }
 
-      static bool apply_one_update(unsigned char* vertex_state,
-				   unsigned char* update_stream,
-				   per_processor_data *per_cpu_data,
-				   unsigned long bsp_phase)
-      {
-	struct update* u = (struct update*)update_stream;
-	struct vertex* vertices = (struct vertex*)vertex_state;
-	struct vertex* v = &vertices[x_lib::configuration::map_offset(u->target)];
+        static bool init(unsigned char *vertex_state,
+                         unsigned long vertex_index,
+                         unsigned long bsp_phase,
+                         per_processor_data *cpu_state) {
+          struct vertex *vertices = (struct vertex *) vertex_state;
+          init_vertex(*vertices);
+          return true;
+        }
 
-	if (bsp_phase <= niters)
-	  {
-	    // Track how many updates (edges) have been processed
-	    v->count++;
+        static bool apply_one_update(unsigned char *vertex_state,
+                                     unsigned char *update_stream,
+                                     per_processor_data *per_cpu_data,
+                                     unsigned long bsp_phase) {
+          struct update *u = (struct update *) update_stream;
+          struct vertex *vertices = (struct vertex *) vertex_state;
+          struct vertex *v = &vertices[x_lib::configuration::map_offset(u->target)];
 
-	    // Initialize data structures for this iteration - zero out feature vector
-	    // and temp matrix since we'll be adding to them.
-	    if (v->count == 1) {
-	      zero_vector(v->feature_vec);
-	      zero_matrix(v->temp_mat);
-	    }
+          if (bsp_phase <= niters) {
+            // Track how many updates (edges) have been processed
+            v->count++;
 
-	    // To compute the new feature vector of vertex v, we need to solve the system: A*feature_vec=b
-	    // A is a matrix: A = O * O^T + D
-	    // O is a submatrix of the other side of the graph where column vectors are feature vectors of
-	    // those vertices that are connected to this vertex
-	    // O^T is a transpose of O
-	    // D is a diagonal matrix: D = lambda * degree * I, where I is an identity matrix
-	    // b is a vector: b = O * r
-	    // r is a ratings vector formed from the ratings of outgoing edges
+            // Initialize data structures for this iteration - zero out feature vector
+            // and temp matrix since we'll be adding to them.
+            if (v->count == 1) {
+              zero_vector(v->feature_vec);
+              zero_matrix(v->temp_mat);
+            }
 
-	    // Calculating O*O^T and b
-	    for (int i = 0; i < RANK; i++) {
-	      v->feature_vec[i] += u->feature_vec[i] * u->rating;
-	      for (int j = 0; j < RANK; j++) {
-		v->temp_mat[i][j] += u->feature_vec[i] * u->feature_vec[j];
-	      }
-	    }
+            // To compute the new feature vector of vertex v, we need to solve the system: A*feature_vec=b
+            // A is a matrix: A = O * O^T + D
+            // O is a submatrix of the other side of the graph where column vectors are feature vectors of
+            // those vertices that are connected to this vertex
+            // O^T is a transpose of O
+            // D is a diagonal matrix: D = lambda * degree * I, where I is an identity matrix
+            // b is a vector: b = O * r
+            // r is a ratings vector formed from the ratings of outgoing edges
 
-	    // Additional procesing after all updates have been gathered
-	    if (v->count == v->degree)
-	      {
-		// Adding D to A
-		for (int i = 0; i < RANK; i++) {
-		  v->temp_mat[i][i] += LAMBDA * v->degree;
-		}
+            // Calculating O*O^T and b
+            for (int i = 0; i < RANK; i++) {
+              v->feature_vec[i] += u->feature_vec[i] * u->rating;
+              for (int j = 0; j < RANK; j++) {
+                v->temp_mat[i][j] += u->feature_vec[i] * u->feature_vec[j];
+              }
+            }
 
-		// Solve to get the new feature vector for the vertex
-		solve(v->temp_mat, v->feature_vec);
+            // Additional procesing after all updates have been gathered
+            if (v->count == v->degree) {
+              // Adding D to A
+              for (int i = 0; i < RANK; i++) {
+                v->temp_mat[i][i] += LAMBDA * v->degree;
+              }
 
-		// Reset count for the next iteration
-		v->count = 0;
-	      }
+              // Solve to get the new feature vector for the vertex
+              solve(v->temp_mat, v->feature_vec);
 
-	    return true;
-	  }
+              // Reset count for the next iteration
+              v->count = 0;
+            }
 
-	// After all iterations are finished, we use one more phase to
-	// compute the sum of square errors. This is done on the right side.
-	else
-	  {
-	    double sqerror = u->rating;
-	    for (int i = 0; i < RANK; i++)
-	      sqerror -= v->feature_vec[i] * u->feature_vec[i];
-	    sqerror *= sqerror;
+            return true;
+          }
 
-	    static_cast<als_per_processor_data*>(per_cpu_data)->sse_local += sqerror;
-	
-	    // And we stop processing
-	    return false;
-	  }
-      }
+            // After all iterations are finished, we use one more phase to
+            // compute the sum of square errors. This is done on the right side.
+          else {
+            double sqerror = u->rating;
+            for (int i = 0; i < RANK; i++)
+              sqerror -= v->feature_vec[i] * u->feature_vec[i];
+            sqerror *= sqerror;
 
-      static bool generate_update(unsigned char* vertex_state,
-				  unsigned char* edge_format,
-				  unsigned char* update_stream,
-				  per_processor_data* per_processor_data,
-				  unsigned long bsp_phase)
-      {
-	vertex_t src, dst;
-	weight_t rating;
-	F::read_edge(edge_format, src, dst, rating);
+            static_cast<als_per_processor_data *>(per_cpu_data)->sse_local += sqerror;
 
-	struct vertex* vertices = (struct vertex*)vertex_state;
-	struct vertex* v = &vertices[x_lib::configuration::map_offset(src)];
+            // And we stop processing
+            return false;
+          }
+        }
 
-	// Iteration 0 is also used to count the vertex degree
-	if (bsp_phase == 0)
-	  {
-	    v->degree++;
-	  }
-      
-	// The graph is bipartite, and it is assumed that lower ids
-	// form the left side.
-	// The alternating starts by solving the right side in iteration 1,
-	// after the left side generates first updates in iteration 0.
-	// Therefore, in even numbered iterations we solve the left
-	// side, and in odd numbered iterations we solve the right side.
-	// Likewise, the left side generates updates in even numbered 
-	// iterations, and the right side in odd numbered iterations.
+        static bool generate_update(unsigned char *vertex_state,
+                                    unsigned char *edge_format,
+                                    unsigned char *update_stream,
+                                    per_processor_data *per_processor_data,
+                                    unsigned long bsp_phase) {
+          vertex_t src, dst;
+          weight_t rating;
+          F::read_edge(edge_format, src, dst, rating);
 
-	bool leftside = (src < dst) ? true : false;
+          struct vertex *vertices = (struct vertex *) vertex_state;
+          struct vertex *v = &vertices[x_lib::configuration::map_offset(src)];
 
-	if ((bsp_phase % 2 == 0 && leftside) || (bsp_phase % 2 == 1 && !leftside))
-	  {
-	    struct update* u = (struct update*)update_stream;
-	    u->target = dst;
-	    u->rating = (double)rating;
-	    copy_vector(v->feature_vec, u->feature_vec);
-	    return true;
-	  }
-	else
-	  return false;
-      }
+          // Iteration 0 is also used to count the vertex degree
+          if (bsp_phase == 0) {
+            v->degree++;
+          }
 
-      static void preprocessing()
-      {
-	// We double the number, since in one phase we process one side of the
-	// bipartite graph
-	niters = 2 * vm["als::niters"].as<unsigned long>();
-      }
+          // The graph is bipartite, and it is assumed that lower ids
+          // form the left side.
+          // The alternating starts by solving the right side in iteration 1,
+          // after the left side generates first updates in iteration 0.
+          // Therefore, in even numbered iterations we solve the left
+          // side, and in odd numbered iterations we solve the right side.
+          // Likewise, the left side generates updates in even numbered
+          // iterations, and the right side in odd numbered iterations.
 
-      static void postprocessing()
-      {
-	BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ALS::SSE " << als_per_processor_data::sse;
-	unsigned long nedges = pt.get<unsigned long>("graph.edges");
-	double rmse = std::sqrt( als_per_processor_data::sse / (1. * nedges) );
-	BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ALS::RMSE " << rmse;
-      }
+          bool leftside = (src < dst) ? true : false;
 
-      static per_processor_data * 
-      create_per_processor_data(unsigned long processor_id)
-      {
-	return new als_per_processor_data();
-      }
-    
-      static unsigned long min_super_phases()
-      {
-	return 1;
-      }
+          if ((bsp_phase % 2 == 0 && leftside) || (bsp_phase % 2 == 1 && !leftside)) {
+            struct update *u = (struct update *) update_stream;
+            u->target = dst;
+            u->rating = (double) rating;
+            copy_vector(v->feature_vec, u->feature_vec);
+            return true;
+          }
+          else
+            return false;
+        }
 
-      static bool need_init(unsigned long bsp_phase)
-      {
-	return (bsp_phase == 0);
-      }
-    
+        static void preprocessing() {
+          // We double the number, since in one phase we process one side of the
+          // bipartite graph
+          niters = 2 * vm["als::niters"].as < unsigned
+          long > ();
+        }
+
+        static void postprocessing() {
+          BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ALS::SSE " << als_per_processor_data::sse;
+          unsigned long nedges = pt.get < unsigned
+          long > ("graph.edges");
+          double rmse = std::sqrt(als_per_processor_data::sse / (1. * nedges));
+          BOOST_LOG_TRIVIAL(info) << "ALGORITHM::ALS::RMSE " << rmse;
+        }
+
+        static per_processor_data *
+        create_per_processor_data(unsigned long processor_id) {
+          return new als_per_processor_data();
+        }
+
+        static unsigned long min_super_phases() {
+          return 1;
+        }
+
+        static bool need_init(unsigned long bsp_phase) {
+          return (bsp_phase == 0);
+        }
+
     };
 
     // These should be in a cpp file, but it's ok since we only include

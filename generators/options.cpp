@@ -22,41 +22,46 @@
 
 namespace po = boost::program_options;
 
-int process_options(int argc, char** argv, bool rmat_generator, struct options* options)
-{
+int process_options(int argc, char **argv, bool rmat_generator, struct options *options) {
   // Options common for both generators
   po::options_description common("Common options");
   common.add_options()
-    ("help", "print this message")    
-    ("name", po::value<std::string>(&options->global.graphname), "graph name")
-    ("threads", po::value<int>(&options->global.nthreads)->default_value(DEFAULT_NTHREADS), "number of threads")
-    ("buffer-size", po::value<size_t>(&options->global.buffer_size), "buffer size in bytes")
-    ("bpt", po::value<int>(&options->global.buffers_per_thread)->default_value(DEFAULT_BUFFERS_PER_THREAD), "number of buffers per thread")
-    ("symmetric", "emit also a reverse edge for each generated edge")
-    ("seed1", po::value<uint64_t>(&options->rng.userseed1)->default_value(DEFAULT_RNG_USERSEED1), "first 64b of seed for rng")
-    ("seed2", po::value<uint64_t>(&options->rng.userseed2)->default_value(DEFAULT_RNG_USERSEED2), "second 64b of seed for rng")
-  ;
+      ("help", "print this message")
+      ("name", po::value<std::string>(&options->global.graphname), "graph name")
+      ("threads", po::value<int>(&options->global.nthreads)->default_value(DEFAULT_NTHREADS), "number of threads")
+      ("buffer-size", po::value<size_t>(&options->global.buffer_size), "buffer size in bytes")
+      ("bpt", po::value<int>(&options->global.buffers_per_thread)->default_value(DEFAULT_BUFFERS_PER_THREAD),
+       "number of buffers per thread")
+      ("symmetric", "emit also a reverse edge for each generated edge")
+      ("seed1", po::value<uint64_t>(&options->rng.userseed1)->default_value(DEFAULT_RNG_USERSEED1),
+       "first 64b of seed for rng")
+      ("seed2", po::value<uint64_t>(&options->rng.userseed2)->default_value(DEFAULT_RNG_USERSEED2),
+       "second 64b of seed for rng");
 
   // Options specific to ER
   po::options_description er("Erdos-Renyi");
   er.add_options()
-    ("vertices", po::value<vertex_t>(&options->erdos_renyi.vertices)->default_value(DEFAULT_ER_VERTICES), "number of vertices")
-    ("edges", po::value<edge_t>(&options->erdos_renyi.edges)->default_value(DEFAULT_ER_EDGES), "number of edges")
-    ("self-loops", "allow self loops")
-    ("bipartite", po::value<vertex_t>(&options->erdos_renyi.bipartite), "argument should specify the number of vertices on the left side")
-  ;
+      ("vertices", po::value<vertex_t>(&options->erdos_renyi.vertices)->default_value(DEFAULT_ER_VERTICES),
+       "number of vertices")
+      ("edges", po::value<edge_t>(&options->erdos_renyi.edges)->default_value(DEFAULT_ER_EDGES), "number of edges")
+      ("self-loops", "allow self loops")
+      ("bipartite", po::value<vertex_t>(&options->erdos_renyi.bipartite),
+       "argument should specify the number of vertices on the left side");
 
   // Options specific to RMAT
   po::options_description rmat("R-MAT");
   rmat.add_options()
-    ("scale", po::value<int>(&options->rmat.scale)->default_value(DEFAULT_RMAT_SCALE), "log2 of the number of vertices")
-    ("edges", po::value<edge_t>(&options->rmat.edges)->default_value(DEFAULT_RMAT_EDGES), "number of edges")
-    ("a", po::value<double>(&options->rmat.a)->default_value(DEFAULT_RMAT_A, "0.57"), "a, b, c, d are RMAT probabilities (usually a = 3b = 3c > d)")
-    ("b", po::value<double>(&options->rmat.b)->default_value(DEFAULT_RMAT_B, "0.19"), "")
-    ("c", po::value<double>(&options->rmat.c)->default_value(DEFAULT_RMAT_C, "0.19"), "")
-    ("xscale_interval", po::value<unsigned int>(&options->rmat.xscale_interval)->default_value(1), "# xscale machines")
-    ("xscale_node", po::value<unsigned int>(&options->rmat.xscale_node)->default_value(0), "xscale machine number")
-  ;
+      ("scale", po::value<int>(&options->rmat.scale)->default_value(DEFAULT_RMAT_SCALE),
+       "log2 of the number of vertices")
+      ("edges", po::value<edge_t>(&options->rmat.edges)->default_value(DEFAULT_RMAT_EDGES), "number of edges")
+      ("a", po::value<double>(&options->rmat.a)->default_value(DEFAULT_RMAT_A, "0.57"),
+       "a, b, c, d are RMAT probabilities (usually a = 3b = 3c > d)")
+      ("b", po::value<double>(&options->rmat.b)->default_value(DEFAULT_RMAT_B, "0.19"), "")
+      ("c", po::value<double>(&options->rmat.c)->default_value(DEFAULT_RMAT_C, "0.19"), "")
+      ("xscale_interval", po::value < unsigned
+  int > (&options->rmat.xscale_interval)->default_value(1), "# xscale machines")
+  ("xscale_node", po::value < unsigned
+  int > (&options->rmat.xscale_node)->default_value(0), "xscale machine number");
 
   po::options_description cmdline_options;
   if (rmat_generator)
@@ -75,8 +80,7 @@ int process_options(int argc, char** argv, bool rmat_generator, struct options* 
   }
 
   // Help
-  if (vm.count("help") || !vm.count("name") || err)
-  {
+  if (vm.count("help") || !vm.count("name") || err) {
     std::cout << "Usage: " << (rmat_generator ? "rmat" : "erdor-renyi") << " --name graphname [options]\n";
     std::cout << "       " << (rmat_generator ? "rmat" : "erdor-renyi") << " --help\n";
     std::cout << cmdline_options << "\n";
@@ -103,5 +107,5 @@ int process_options(int argc, char** argv, bool rmat_generator, struct options* 
     options->erdos_renyi.bipartite = 0;
   }
 
-  return 0;  
+  return 0;
 }

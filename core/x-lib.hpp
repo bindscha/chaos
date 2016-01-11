@@ -33,1100 +33,1095 @@
 #define OUTBUF_SIZE 8192
 namespace x_lib {
   struct stream_callback_state {
-    bool ingest;
-    bool local_tile;
-    unsigned char *state;
-    unsigned long superp;
-    unsigned long partition_id;
-    unsigned char *bufin;    // callee can change
-    unsigned long bytes_in;  // callee must set
-    unsigned char *bufout;   // callee can change
-    unsigned long bytes_out; // callee must set
-    unsigned long bytes_out_max;
+      bool ingest;
+      bool local_tile;
+      unsigned char *state;
+      unsigned long superp;
+      unsigned long partition_id;
+      unsigned char *bufin;    // callee can change
+      unsigned long bytes_in;  // callee must set
+      unsigned char *bufout;   // callee can change
+      unsigned long bytes_out; // callee must set
+      unsigned long bytes_out_max;
 #ifdef PYTHON_SUPPORT
-    PyObject *pbufin;
-    unsigned long pbufin_offset;
-    PyObject *pbufout;
-    PyObject *pstate;
-    unsigned long pstate_offset;
+      PyObject *pbufin;
+      unsigned long pbufin_offset;
+      PyObject *pbufout;
+      PyObject *pstate;
+      unsigned long pstate_offset;
 #endif
-    algorithm::per_processor_data *cpu_state;
+      algorithm::per_processor_data *cpu_state;
   };
 
   struct work_base {
-    virtual void operator()
-        (unsigned long processor_id,
-         configuration *config,
-         x_barrier *sync,
-         algorithm::per_processor_data *cpu_state,
-         unsigned char *outbuf) = 0;
+      virtual void operator()
+          (unsigned long processor_id,
+           configuration *config,
+           x_barrier *sync,
+           algorithm::per_processor_data *cpu_state,
+           unsigned char *outbuf) = 0;
   };
 
   template<typename A>
   struct state_iter_work : public work_base {
-    memory_buffer *state_buffer;
-    unsigned long superp;
+      memory_buffer *state_buffer;
+      unsigned long superp;
 
-    void operator()(unsigned long processor_id,
-                    configuration *config,
-                    x_barrier *sync,
-                    algorithm::per_processor_data *cpu_state,
-                    unsigned char *outbuf) {
-      unsigned long tile_size =
-          config->cached_partitions / config->tiles;
-      unsigned long partitions_per_cpu = tile_size / config->processors;
-      unsigned long remainder = tile_size -
-                                partitions_per_cpu * config->processors;
-      unsigned long start = partitions_per_cpu * processor_id;
-      unsigned long count = partitions_per_cpu;
-      if (processor_id == (config->processors - 1)) {
-        count += remainder;
-      }
-      unsigned long i, j, k;
-      for (i = start, j = 0; j < count; i++, j++) {
-        unsigned long vertices = config->state_count(superp, i);
-        for (k = 0; k < vertices; k++) {
-          unsigned char *vertex =
-              &state_buffer->buffer[state_buffer->index[0][i] + k * config->vertex_size];
-          A::state_iter_callback(superp, i, k, vertex, cpu_state);
+      void operator()(unsigned long processor_id,
+                      configuration *config,
+                      x_barrier *sync,
+                      algorithm::per_processor_data *cpu_state,
+                      unsigned char *outbuf) {
+        unsigned long tile_size =
+            config->cached_partitions / config->tiles;
+        unsigned long partitions_per_cpu = tile_size / config->processors;
+        unsigned long remainder = tile_size -
+                                  partitions_per_cpu * config->processors;
+        unsigned long start = partitions_per_cpu * processor_id;
+        unsigned long count = partitions_per_cpu;
+        if (processor_id == (config->processors - 1)) {
+          count += remainder;
+        }
+        unsigned long i, j, k;
+        for (i = start, j = 0; j < count; i++, j++) {
+          unsigned long vertices = config->state_count(superp, i);
+          for (k = 0; k < vertices; k++) {
+            unsigned char *vertex =
+                &state_buffer->buffer[state_buffer->index[0][i] + k * config->vertex_size];
+            A::state_iter_callback(superp, i, k, vertex, cpu_state);
+          }
         }
       }
-    }
   } __attribute__((__aligned__(64)));
 
 
   template<typename A>
   struct vertex_merge_work : public work_base {
-    unsigned char *main_tile;
-    unsigned char *copy_tile;
-    unsigned long copy_machine;
-    unsigned long tile_vertices;
+      unsigned char *main_tile;
+      unsigned char *copy_tile;
+      unsigned long copy_machine;
+      unsigned long tile_vertices;
 
-    void operator()(unsigned long processor_id,
-                    configuration *config,
-                    x_barrier *sync,
-                    algorithm::per_processor_data *cpu_state,
-                    unsigned char *outbuf) {
-      unsigned long vertices_per_cpu =
-          tile_vertices / config->processors;
-      unsigned long remainder = tile_vertices -
-                                vertices_per_cpu * config->processors;
-      unsigned long start = vertices_per_cpu * processor_id;
-      unsigned long count = vertices_per_cpu;
-      if (processor_id == (config->processors - 1)) {
-        count += remainder;
+      void operator()(unsigned long processor_id,
+                      configuration *config,
+                      x_barrier *sync,
+                      algorithm::per_processor_data *cpu_state,
+                      unsigned char *outbuf) {
+        unsigned long vertices_per_cpu =
+            tile_vertices / config->processors;
+        unsigned long remainder = tile_vertices -
+                                  vertices_per_cpu * config->processors;
+        unsigned long start = vertices_per_cpu * processor_id;
+        unsigned long count = vertices_per_cpu;
+        if (processor_id == (config->processors - 1)) {
+          count += remainder;
+        }
+        unsigned char *vertex = main_tile + start * config->vertex_size;
+        unsigned char *copy = copy_tile + start * config->vertex_size;
+        for (unsigned long i = 0; i < count; i++) {
+          A::vertex_apply(vertex, copy, copy_machine, cpu_state);
+          vertex += config->vertex_size;
+          copy += config->vertex_size;
+        }
+        sync->wait();
       }
-      unsigned char *vertex = main_tile + start * config->vertex_size;
-      unsigned char *copy = copy_tile + start * config->vertex_size;
-      for (unsigned long i = 0; i < count; i++) {
-        A::vertex_apply(vertex, copy, copy_machine, cpu_state);
-        vertex += config->vertex_size;
-        copy += config->vertex_size;
-      }
-      sync->wait();
-    }
   } __attribute__((__aligned__(64)));
 
 
   template<typename A, typename IN, typename OUT>
   struct work : public work_base {
-    unsigned long superp;
-    memory_buffer *state;
-    memory_buffer *stream_in;
-    memory_buffer *ingest;
-    memory_buffer *stream_out;
-    filter *input_filter;
-    unsigned long disk_stream_out;
-    rtc_clock *io_clock;
-    bool local_tile;
+      unsigned long superp;
+      memory_buffer *state;
+      memory_buffer *stream_in;
+      memory_buffer *ingest;
+      memory_buffer *stream_out;
+      filter *input_filter;
+      unsigned long disk_stream_out;
+      rtc_clock *io_clock;
+      bool local_tile;
 
-    bool flush_buffer(unsigned long processor_id,
-                      configuration *config,
-                      x_barrier *sync,
-                      algorithm::per_processor_data *cpu_state) {
-      bool empty = false;
-      sync->wait();
-      if (stream_out->bufsize > 0) {
-        make_index<OUT, map_spshift_wrap>(stream_out, processor_id,
-                                          config->super_partitions * config->tiles,
-                                          sync);
-        if (processor_id == 0) {
-          slipstore::ioService.post(boost::bind(&memory_buffer::drain,
-                                                stream_out,
-                                                slipstore::slipstore_client_drain,
-                                                disk_stream_out,
-                                                OUT::item_size(),
-                                                config->processors));
-          stream_out = memory_buffer::get_free_buffer(*io_clock);
-        }
-      }
-      else {
-        empty = true;
-      }
-      sync->wait();
-      return empty;
-    }
-
-    void final_flush(unsigned long processor_id,
-                     configuration *config,
-                     x_barrier *sync,
-                     algorithm::per_processor_data *cpu_state) {
-      bool empty;
-      do {
-        empty = flush_buffer(processor_id, config, sync, cpu_state);
-      } while (!empty);
-      sync->wait();
-      if (processor_id == 0) {
-        stream_out->cleanup();
-        memory_buffer::release_buffer(stream_out);
-      }
-    }
-
-    void append_buffer(unsigned char *buffer, unsigned long bytes,
-                       unsigned long processor_id, configuration *config,
-                       x_barrier *sync, algorithm::per_processor_data *cpu_state) {
-      while (bytes) {
-        unsigned char *base = stream_out->buffer;
-        unsigned long offset_start = stream_out->bufsize;
-        unsigned long space =
-            (MIN(stream_out->bufbytes - offset_start, bytes)
-             / OUT::item_size()) * OUT::item_size();
-        unsigned long offset_stop = offset_start + space;
-        if (__sync_bool_compare_and_swap(&stream_out->bufsize,
-                                         offset_start,
-                                         offset_stop)) {
-          memcpy(base + offset_start, buffer, space);
-          if (space != bytes) { // Need flush
-            (void) flush_buffer(processor_id, config, sync, cpu_state);
-          }
-          bytes -= space;
-          buffer += space;
-        }
-      }
-    }
-
-    void execute_callback(stream_callback_state *callback,
-                          unsigned long processor_id,
-                          configuration *config,
-                          x_barrier *sync,
-                          algorithm::per_processor_data *cpu_state,
-                          unsigned char *outbuf) {
-      callback->bufout = outbuf;
-      callback->bytes_out = 0;
-#ifdef PYTHON_SUPPORT
-      callback->pbufin        = stream_in->pBuffer;
-      callback->pbufin_offset = callback->bufin - stream_in->buffer;
-      npy_intp dim[1]={OUTBUF_SIZE};
-      callback->pbufout       = PyArray_SimpleNewFromData(1, dim, NPY_UINT8, (void *)outbuf);
-      callback->pstate        = state->pBuffer;
-      callback->pstate_offset = callback->state - state->buffer;
-#endif
-      while (callback->bytes_in) {
-        A::partition_callback(callback);
-        if (stream_out != NULL && callback->bytes_out > 0) {
-          append_buffer(outbuf, callback->bytes_out,
-                        processor_id, config, sync,
-                        cpu_state);
-          callback->bufout = outbuf;
-          callback->bytes_out = 0;
-        }
-      }
-#ifdef PYTHON_SUPPORT
-      Py_DECREF(callback->pbufout);
-#endif
-    }
-
-    void operator()(unsigned long processor_id,
-                    configuration *config,
-                    x_barrier *sync,
-                    algorithm::per_processor_data *cpu_state,
-                    unsigned char *outbuf) {
-      if (stream_in == NULL && stream_out == NULL) {
-        A::do_cpu_callback(cpu_state);
-        return;
-      }
-      stream_callback_state callback_state;
-      callback_state.superp = superp;
-      callback_state.local_tile = local_tile;
-      callback_state.bytes_out_max =
-          (OUTBUF_SIZE / OUT::item_size()) * OUT::item_size();
-      callback_state.cpu_state = cpu_state;
-      // Must play ingest first
-      if (ingest != NULL) {
+      bool flush_buffer(unsigned long processor_id,
+                        configuration *config,
+                        x_barrier *sync,
+                        algorithm::per_processor_data *cpu_state) {
+        bool empty = false;
         sync->wait();
-        callback_state.ingest = true;
-        make_index<IN, map_spshift_wrap>(ingest, processor_id,
-                                         config->super_partitions,
-                                         sync);
-        unsigned long ingest_bytes;
-        unsigned char *ingest_src =
-            ingest->get_substream(processor_id, superp, &ingest_bytes);
-        unsigned long offset_start;
-        unsigned long offset_stop;
-        do {
-          offset_start = stream_in->bufsize;
-          offset_stop = offset_start + ingest_bytes;
-        } while (!__sync_bool_compare_and_swap(&stream_in->bufsize,
-                                               offset_start,
-                                               offset_stop));
-        memcpy(stream_in->buffer + offset_start,
-               ingest_src,
-               ingest_bytes);
-        sync->wait();
-        if (processor_id == 0) {
-          BOOST_ASSERT_MSG(stream_in->bufsize == ingest->bufsize,
-                           "Error in partitioning ingest !");
-          ingest = NULL;
-        }
-      }
-      else {
-        callback_state.ingest = false;
-      }
-      if (stream_in != NULL) {
-        make_index<IN, map_cached_partition_wrap>
-            (stream_in, processor_id, config->cached_partitions, sync);
-      }
-      sync->wait();
-      input_filter->prep_dq(processor_id);
-      sync->wait();
-      unsigned long partition_id;
-      while ((partition_id = input_filter->dq(processor_id)) != ULONG_MAX) {
-        callback_state.state = &state->buffer[state->index[0][partition_id]];
-        callback_state.partition_id = partition_id;
-        A::partition_pre_callback(superp, partition_id, cpu_state);
-        if (stream_in != NULL) {
-          for (unsigned long i = 0; i < config->processors; i++) {
-            callback_state.bufin =
-                stream_in->get_substream(i, partition_id,
-                                         &callback_state.bytes_in);
-            execute_callback(&callback_state,
-                             processor_id,
-                             config,
-                             sync,
-                             cpu_state,
-                             outbuf);
+        if (stream_out->bufsize > 0) {
+          make_index<OUT, map_spshift_wrap>(stream_out, processor_id,
+                                            config->super_partitions * config->tiles,
+                                            sync);
+          if (processor_id == 0) {
+            slipstore::ioService.post(boost::bind(&memory_buffer::drain,
+                                                  stream_out,
+                                                  slipstore::slipstore_client_drain,
+                                                  disk_stream_out,
+                                                  OUT::item_size(),
+                                                  config->processors));
+            stream_out = memory_buffer::get_free_buffer(*io_clock);
           }
         }
         else {
-          callback_state.bufin = callback_state.state;
-          callback_state.bytes_in =
-              config->vertex_size * config->state_count(superp, partition_id);
-          execute_callback(&callback_state, processor_id, config, sync,
-                           cpu_state, outbuf);
+          empty = true;
         }
-        A::partition_post_callback(superp, partition_id, cpu_state);
+        sync->wait();
+        return empty;
       }
-      if (stream_out != NULL) {
-        final_flush(processor_id, config, sync, cpu_state);
+
+      void final_flush(unsigned long processor_id,
+                       configuration *config,
+                       x_barrier *sync,
+                       algorithm::per_processor_data *cpu_state) {
+        bool empty;
+        do {
+          empty = flush_buffer(processor_id, config, sync, cpu_state);
+        } while (!empty);
+        sync->wait();
+        if (processor_id == 0) {
+          stream_out->cleanup();
+          memory_buffer::release_buffer(stream_out);
+        }
       }
-    }
+
+      void append_buffer(unsigned char *buffer, unsigned long bytes,
+                         unsigned long processor_id, configuration *config,
+                         x_barrier *sync, algorithm::per_processor_data *cpu_state) {
+        while (bytes) {
+          unsigned char *base = stream_out->buffer;
+          unsigned long offset_start = stream_out->bufsize;
+          unsigned long space =
+              (MIN(stream_out->bufbytes - offset_start, bytes)
+               / OUT::item_size()) * OUT::item_size();
+          unsigned long offset_stop = offset_start + space;
+          if (__sync_bool_compare_and_swap(&stream_out->bufsize,
+                                           offset_start,
+                                           offset_stop)) {
+            memcpy(base + offset_start, buffer, space);
+            if (space != bytes) { // Need flush
+              (void) flush_buffer(processor_id, config, sync, cpu_state);
+            }
+            bytes -= space;
+            buffer += space;
+          }
+        }
+      }
+
+      void execute_callback(stream_callback_state *callback,
+                            unsigned long processor_id,
+                            configuration *config,
+                            x_barrier *sync,
+                            algorithm::per_processor_data *cpu_state,
+                            unsigned char *outbuf) {
+        callback->bufout = outbuf;
+        callback->bytes_out = 0;
+#ifdef PYTHON_SUPPORT
+        callback->pbufin        = stream_in->pBuffer;
+        callback->pbufin_offset = callback->bufin - stream_in->buffer;
+        npy_intp dim[1]={OUTBUF_SIZE};
+        callback->pbufout       = PyArray_SimpleNewFromData(1, dim, NPY_UINT8, (void *)outbuf);
+        callback->pstate        = state->pBuffer;
+        callback->pstate_offset = callback->state - state->buffer;
+#endif
+        while (callback->bytes_in) {
+          A::partition_callback(callback);
+          if (stream_out != NULL && callback->bytes_out > 0) {
+            append_buffer(outbuf, callback->bytes_out,
+                          processor_id, config, sync,
+                          cpu_state);
+            callback->bufout = outbuf;
+            callback->bytes_out = 0;
+          }
+        }
+#ifdef PYTHON_SUPPORT
+        Py_DECREF(callback->pbufout);
+#endif
+      }
+
+      void operator()(unsigned long processor_id,
+                      configuration *config,
+                      x_barrier *sync,
+                      algorithm::per_processor_data *cpu_state,
+                      unsigned char *outbuf) {
+        if (stream_in == NULL && stream_out == NULL) {
+          A::do_cpu_callback(cpu_state);
+          return;
+        }
+        stream_callback_state callback_state;
+        callback_state.superp = superp;
+        callback_state.local_tile = local_tile;
+        callback_state.bytes_out_max =
+            (OUTBUF_SIZE / OUT::item_size()) * OUT::item_size();
+        callback_state.cpu_state = cpu_state;
+        // Must play ingest first
+        if (ingest != NULL) {
+          sync->wait();
+          callback_state.ingest = true;
+          make_index<IN, map_spshift_wrap>(ingest, processor_id,
+                                           config->super_partitions,
+                                           sync);
+          unsigned long ingest_bytes;
+          unsigned char *ingest_src =
+              ingest->get_substream(processor_id, superp, &ingest_bytes);
+          unsigned long offset_start;
+          unsigned long offset_stop;
+          do {
+            offset_start = stream_in->bufsize;
+            offset_stop = offset_start + ingest_bytes;
+          } while (!__sync_bool_compare_and_swap(&stream_in->bufsize,
+                                                 offset_start,
+                                                 offset_stop));
+          memcpy(stream_in->buffer + offset_start,
+                 ingest_src,
+                 ingest_bytes);
+          sync->wait();
+          if (processor_id == 0) {
+            BOOST_ASSERT_MSG(stream_in->bufsize == ingest->bufsize,
+                             "Error in partitioning ingest !");
+            ingest = NULL;
+          }
+        }
+        else {
+          callback_state.ingest = false;
+        }
+        if (stream_in != NULL) {
+          make_index<IN, map_cached_partition_wrap>
+              (stream_in, processor_id, config->cached_partitions, sync);
+        }
+        sync->wait();
+        input_filter->prep_dq(processor_id);
+        sync->wait();
+        unsigned long partition_id;
+        while ((partition_id = input_filter->dq(processor_id)) != ULONG_MAX) {
+          callback_state.state = &state->buffer[state->index[0][partition_id]];
+          callback_state.partition_id = partition_id;
+          A::partition_pre_callback(superp, partition_id, cpu_state);
+          if (stream_in != NULL) {
+            for (unsigned long i = 0; i < config->processors; i++) {
+              callback_state.bufin =
+                  stream_in->get_substream(i, partition_id,
+                                           &callback_state.bytes_in);
+              execute_callback(&callback_state,
+                               processor_id,
+                               config,
+                               sync,
+                               cpu_state,
+                               outbuf);
+            }
+          }
+          else {
+            callback_state.bufin = callback_state.state;
+            callback_state.bytes_in =
+                config->vertex_size * config->state_count(superp, partition_id);
+            execute_callback(&callback_state, processor_id, config, sync,
+                             cpu_state, outbuf);
+          }
+          A::partition_post_callback(superp, partition_id, cpu_state);
+        }
+        if (stream_out != NULL) {
+          final_flush(processor_id, config, sync, cpu_state);
+        }
+      }
   } __attribute__((aligned(64)));
 
   template<typename OBJ>
   struct sp_copy : public work_base {
-    memory_buffer *stream_out;
-    unsigned long disk_stream_out;
-    rtc_clock *io_clock;
-    unsigned long fanout;
-    slipstore::io *handle;
+      memory_buffer *stream_out;
+      unsigned long disk_stream_out;
+      rtc_clock *io_clock;
+      unsigned long fanout;
+      slipstore::io *handle;
 
-    void operator()(unsigned long processor_id,
-                    configuration *config,
-                    x_barrier *sync,
-                    algorithm::per_processor_data *cpu_state,
-                    unsigned char *outbuf) {
-      sync->wait();
-      make_index<OBJ, map_spshift_wrap>(stream_out,
-                                        processor_id,
-                                        config->super_partitions * config->tiles,
-                                        sync);
-      if (processor_id == 0) {
-        slipstore::ioService.post(boost::bind(&memory_buffer::drain_local,
-                                              stream_out,
-                                              slipstore::slipstore_client_drain,
-                                              handle,
-                                              disk_stream_out,
-                                              OBJ::item_size(),
-                                              config->processors));
+      void operator()(unsigned long processor_id,
+                      configuration *config,
+                      x_barrier *sync,
+                      algorithm::per_processor_data *cpu_state,
+                      unsigned char *outbuf) {
+        sync->wait();
+        make_index<OBJ, map_spshift_wrap>(stream_out,
+                                          processor_id,
+                                          config->super_partitions * config->tiles,
+                                          sync);
+        if (processor_id == 0) {
+          slipstore::ioService.post(boost::bind(&memory_buffer::drain_local,
+                                                stream_out,
+                                                slipstore::slipstore_client_drain,
+                                                handle,
+                                                disk_stream_out,
+                                                OBJ::item_size(),
+                                                config->processors));
+        }
+        sync->wait();
       }
-      sync->wait();
-    }
   };
 
   class x_thread {
   public:
-    static x_barrier *sync;
-    struct configuration *config;
-    algorithm::per_processor_data *const cpu_state;
-    const unsigned long processor_id;
-    static volatile bool terminate;
-    static struct work_base *volatile work_to_do;
-    unsigned char *outbuf;
+      static x_barrier *sync;
+      struct configuration *config;
+      algorithm::per_processor_data *const cpu_state;
+      const unsigned long processor_id;
+      static volatile bool terminate;
+      static struct work_base *volatile work_to_do;
+      unsigned char *outbuf;
 
-    x_thread(struct configuration *config_in,
-             unsigned long processor_id_in,
-             algorithm::per_processor_data *cpu_state_in)
-        : config(config_in),
-          cpu_state(cpu_state_in),
-          processor_id(processor_id_in) {
-      if (sync == NULL) { // First object
-        sync = new x_barrier(config->processors);
+      x_thread(struct configuration *config_in,
+               unsigned long processor_id_in,
+               algorithm::per_processor_data *cpu_state_in)
+          : config(config_in),
+            cpu_state(cpu_state_in),
+            processor_id(processor_id_in) {
+        if (sync == NULL) { // First object
+          sync = new x_barrier(config->processors);
+        }
+        outbuf = (unsigned char *) map_anon_memory(OUTBUF_SIZE, true, "thread outbuf");
       }
-      outbuf = (unsigned char *) map_anon_memory(OUTBUF_SIZE, true, "thread outbuf");
-    }
 
-    void operator()() {
-      do {
-        sync->wait();
-        if (terminate) {
-          break;
-        }
-        else {
-          (*work_to_do)(processor_id, config, sync, cpu_state, outbuf);
-          sync->wait(); // Must synchronize before p0 exits (object is on stack)
-        }
-      } while (processor_id != 0);
-    }
+      void operator()() {
+        do {
+          sync->wait();
+          if (terminate) {
+            break;
+          }
+          else {
+            (*work_to_do)(processor_id, config, sync, cpu_state, outbuf);
+            sync->wait(); // Must synchronize before p0 exits (object is on stack)
+          }
+        } while (processor_id != 0);
+      }
 
-    friend class stream_IO;
+      friend class stream_IO;
   } __attribute__((__aligned__(64)));
 
   class null_barrier_work : public slipstore::barrier_work {
   public:
-    virtual void operator()() {
-    }
+      virtual void operator()() {
+      }
   };
 
   class rewind_barrier_work : public slipstore::barrier_work {
-    unsigned long stream;
-    unsigned long super_partition;
-    slipstore::io *streams;
+      unsigned long stream;
+      unsigned long super_partition;
+      slipstore::io *streams;
   public:
-    rewind_barrier_work(unsigned long stream_in,
-                        unsigned long super_partition_in,
-                        slipstore::io *streams_in)
-        : stream(stream_in),
-          super_partition(super_partition_in),
-          streams(streams_in) {
-    }
-
-    virtual void operator()() {
-      for (unsigned long i = 0; i < configuration::tiles; i++) {
-        streams->rewind(stream, super_partition, i);
+      rewind_barrier_work(unsigned long stream_in,
+                          unsigned long super_partition_in,
+                          slipstore::io *streams_in)
+          : stream(stream_in),
+            super_partition(super_partition_in),
+            streams(streams_in) {
       }
-    }
+
+      virtual void operator()() {
+        for (unsigned long i = 0; i < configuration::tiles; i++) {
+          streams->rewind(stream, super_partition, i);
+        }
+      }
   };
 
   class check_empty_work {
-    unsigned long stream;
-    slipstore::io *streams;
+      unsigned long stream;
+      slipstore::io *streams;
   public:
-    volatile bool empty;
-    volatile bool in_progress;
+      volatile bool empty;
+      volatile bool in_progress;
 
-    check_empty_work(unsigned long stream_in,
-                     slipstore::io *streams_in)
-        : stream(stream_in),
-          streams(streams_in),
-          empty(false),
-          in_progress(false) {
-    }
+      check_empty_work(unsigned long stream_in,
+                       slipstore::io *streams_in)
+          : stream(stream_in),
+            streams(streams_in),
+            empty(false),
+            in_progress(false) {
+      }
 
-    void do_it() {
-      empty = slipstore::slipstore_client_fill->check_empty(stream);
-      __sync_synchronize();
-      in_progress = false;
-    }
+      void do_it() {
+        empty = slipstore::slipstore_client_fill->check_empty(stream);
+        __sync_synchronize();
+        in_progress = false;
+      }
   };
 
   class tile_reset_work {
-    unsigned long stream;
-    unsigned long partition;
+      unsigned long stream;
+      unsigned long partition;
   public:
-    volatile bool in_progress;
+      volatile bool in_progress;
 
-    tile_reset_work(unsigned long stream_in, unsigned long partition_in)
-        : stream(stream_in),
-	  partition(partition_in),
-          in_progress(false)
-    {
-    }
+      tile_reset_work(unsigned long stream_in, unsigned long partition_in)
+          : stream(stream_in),
+            partition(partition_in),
+            in_progress(false) {
+      }
 
-    void do_it() {
-      slipstore::slipstore_client_fill->reset(stream, partition, 0);
-      __sync_synchronize();
-      in_progress = false;
-    }
+      void do_it() {
+        slipstore::slipstore_client_fill->reset(stream, partition, 0);
+        __sync_synchronize();
+        in_progress = false;
+      }
   };
 
   class semup_work {
-    unsigned long mc;
+      unsigned long mc;
   public:
-    volatile bool in_progress;
+      volatile bool in_progress;
 
-    semup_work(unsigned long mc_in)
-      : mc(mc_in),
-	in_progress(false)
-    {
-    }
+      semup_work(unsigned long mc_in)
+          : mc(mc_in),
+            in_progress(false) {
+      }
 
-    void do_it() {
-      slipstore::slipstore_client_fill->send_semup(mc);
-      __sync_synchronize();
-      in_progress = false;
-    }
+      void do_it() {
+        slipstore::slipstore_client_fill->send_semup(mc);
+        __sync_synchronize();
+        in_progress = false;
+      }
   };
 
   class order_work {
   public:
-    unsigned long cmd;
-    unsigned long stream;
-    unsigned long master;
-    unsigned long index;
-    volatile unsigned long order_next;
-    volatile bool in_progress;
+      unsigned long cmd;
+      unsigned long stream;
+      unsigned long master;
+      unsigned long index;
+      volatile unsigned long order_next;
+      volatile bool in_progress;
 
-    order_work()
-    {
-    }
+      order_work() {
+      }
 
-    void do_it() {
-      if(cmd == slipstore::CMD_ORDER_INIT) {
-	slipstore::slipstore_client_fill->init_order(stream);
+      void do_it() {
+        if (cmd == slipstore::CMD_ORDER_INIT) {
+          slipstore::slipstore_client_fill->init_order(stream);
+        }
+        else if (cmd == slipstore::CMD_ORDER_NEXT) {
+          order_next = slipstore::slipstore_client_fill->order_next(master,
+                                                                    index);
+        }
+        __sync_synchronize();
+        in_progress = false;
       }
-      else if(cmd == slipstore::CMD_ORDER_NEXT) {
-	order_next = slipstore::slipstore_client_fill->order_next(master,
-								  index);
-      }
-      __sync_synchronize();
-      in_progress = false;
-    }
   };
 
   class reset_barrier_work : public slipstore::barrier_work {
-    unsigned long stream;
-    unsigned long super_partition;
-    slipstore::io *streams;
+      unsigned long stream;
+      unsigned long super_partition;
+      slipstore::io *streams;
   public:
-    reset_barrier_work(unsigned long stream_in,
-                       unsigned long super_partition_in,
-                       slipstore::io *streams_in)
-        : stream(stream_in),
-          super_partition(super_partition_in),
-          streams(streams_in) {
-    }
-
-    virtual void operator()() {
-      for (unsigned long i = 0; i < configuration::tiles; i++) {
-        streams->trunc(stream, super_partition, i);
+      reset_barrier_work(unsigned long stream_in,
+                         unsigned long super_partition_in,
+                         slipstore::io *streams_in)
+          : stream(stream_in),
+            super_partition(super_partition_in),
+            streams(streams_in) {
       }
-    }
+
+      virtual void operator()() {
+        for (unsigned long i = 0; i < configuration::tiles; i++) {
+          streams->trunc(stream, super_partition, i);
+        }
+      }
   };
 
   class help_offer {
-    unsigned long stream;
-    unsigned long super_partition;
-    unsigned long beneficiary;
-    bool tile_sync;
+      unsigned long stream;
+      unsigned long super_partition;
+      unsigned long beneficiary;
+      bool tile_sync;
   public:
-    volatile bool done;
-    volatile bool accepted;
+      volatile bool done;
+      volatile bool accepted;
 
-    help_offer(unsigned long stream_in,
-               unsigned long super_partition_in,
-               unsigned long beneficiary_in,
-               bool tile_sync_in)
-        : stream(stream_in),
-          super_partition(super_partition_in),
-          beneficiary(beneficiary_in),
-          tile_sync(tile_sync_in) {
-      done = false;
-      accepted = false;
-    }
-
-    void make_offer() {
-      slipstore::slipstore_req_t req;
-      req.cmd = slipstore::CMD_OFFER_HELP;
-      req.stream = stream;
-      req.partition = super_partition;
-      req.tile = 0;
-      if (tile_sync) {
-        req.size = 1;
-      }
-      else {
-        req.size = 0;
-      }
-      if (slipstore::slipstore_client_fill->access_store(&req, NULL, beneficiary)) {
-        accepted = true;
-      }
-      else {
+      help_offer(unsigned long stream_in,
+                 unsigned long super_partition_in,
+                 unsigned long beneficiary_in,
+                 bool tile_sync_in)
+          : stream(stream_in),
+            super_partition(super_partition_in),
+            beneficiary(beneficiary_in),
+            tile_sync(tile_sync_in) {
+        done = false;
         accepted = false;
       }
-      __sync_synchronize();
-      done = true;
-    }
+
+      void make_offer() {
+        slipstore::slipstore_req_t req;
+        req.cmd = slipstore::CMD_OFFER_HELP;
+        req.stream = stream;
+        req.partition = super_partition;
+        req.tile = 0;
+        if (tile_sync) {
+          req.size = 1;
+        }
+        else {
+          req.size = 0;
+        }
+        if (slipstore::slipstore_client_fill->access_store(&req, NULL, beneficiary)) {
+          accepted = true;
+        }
+        else {
+          accepted = false;
+        }
+        __sync_synchronize();
+        done = true;
+      }
   };
 
 
   class sync_start_checkpoint {
   public:
-    unsigned long checkpoint;
-    unsigned long io;
+      unsigned long checkpoint;
+      unsigned long io;
 
-    sync_start_checkpoint(unsigned long checkpoint_in)
-        : checkpoint(checkpoint_in) {
-    }
+      sync_start_checkpoint(unsigned long checkpoint_in)
+          : checkpoint(checkpoint_in) {
+      }
 
-    unsigned char *db_buffer() {
-      return (unsigned char *) &io;
-    }
+      unsigned char *db_buffer() {
+        return (unsigned char *) &io;
+      }
 
-    unsigned long db_size() {
-      return sizeof(unsigned long);
-    }
+      unsigned long db_size() {
+        return sizeof(unsigned long);
+      }
 
-    void db_generate() {
-      io = checkpoint;
-    }
-
-    void db_merge() {
-      if (io > checkpoint) {
+      void db_generate() {
         io = checkpoint;
       }
-    }
 
-    void db_absorb() {
-      checkpoint = io;
-    }
+      void db_merge() {
+        if (io > checkpoint) {
+          io = checkpoint;
+        }
+      }
+
+      void db_absorb() {
+        checkpoint = io;
+      }
   };
 
   template<typename A>
   class streamIO {
-    struct configuration *config;
-    slipstore::io *streams;
-    unsigned long open_streams;
-    memory_buffer **ingest_buffers;
-    memory_buffer *state_buffer;
-    unsigned char *tile_buffer;
-    x_thread **workers;
-    boost::thread **thread_array;
-    algorithm::per_processor_data **cpu_state_array;
-    bool state_loaded;
-    bool take_checkpoints;
-    bool *first_touch;
-    bool ext_mem_shuffle;
-    bool sorted_order;
-    bool centralized_order;
-    unsigned long ext_fanout;
-    unsigned long ext_tmps[2];
+      struct configuration *config;
+      slipstore::io *streams;
+      unsigned long open_streams;
+      memory_buffer **ingest_buffers;
+      memory_buffer *state_buffer;
+      unsigned char *tile_buffer;
+      x_thread **workers;
+      boost::thread **thread_array;
+      algorithm::per_processor_data **cpu_state_array;
+      bool state_loaded;
+      bool take_checkpoints;
+      bool *first_touch;
+      bool ext_mem_shuffle;
+      bool sorted_order;
+      bool centralized_order;
+      unsigned long ext_fanout;
+      unsigned long ext_tmps[2];
 
-    /* Tile buffers to copy across data for merging */
-    /* Two to overlap merge work with remote copies */
-    unsigned char *tile_buffers[2];
+      /* Tile buffers to copy across data for merging */
+      /* Two to overlap merge work with remote copies */
+      unsigned char *tile_buffers[2];
 
-    /* Clocks */
-    rtc_clock io_wait_time;
-    rtc_clock tile_copy_time;
-    rtc_clock tile_merge_time;
-    rtc_clock im_barrier_time;
-    rtc_clock processing_stolen_time;
-    rtc_clock merge_wait_time;
+      /* Clocks */
+      rtc_clock io_wait_time;
+      rtc_clock tile_copy_time;
+      rtc_clock tile_merge_time;
+      rtc_clock im_barrier_time;
+      rtc_clock processing_stolen_time;
+      rtc_clock merge_wait_time;
 
 
 #ifdef PYTHON_SUPPORT
-     //M: has to be called before creating python arrays! It is a macro, it has to be inside an int-returning function
-    int import_numpy_array(){
-      import_array();
-      return 0;
-    }
+      //M: has to be called before creating python arrays! It is a macro, it has to be inside an int-returning function
+     int import_numpy_array(){
+       import_array();
+       return 0;
+     }
 #endif
 
-    void make_config() {
+      void make_config() {
 #ifdef PYTHON_SUPPORT
-      Py_Initialize();
-      import_numpy_array();
+        Py_Initialize();
+        import_numpy_array();
 #endif
-      config->memory_buffer_object_size = sizeof(memory_buffer);
-      config->vertex_size = A::vertex_state_bytes();
-      config->vertex_footprint = config->vertex_size +
-                                 A::vertex_stream_buffer_bytes();
-      config->max_streams = A::max_streams();
-      if (ext_mem_shuffle) {
-        config->max_streams += 2;
-      }
-      config->max_buffers = A::max_buffers();
-      config->init();
-      if (vm.count("autotune") > 0) {
-        bool success = config->autotune();
-        if (!success) {
-          BOOST_LOG_TRIVIAL(fatal) << "Auto-tuning failed !";
-          config->dump_config();
-          exit(-1);
+        config->memory_buffer_object_size = sizeof(memory_buffer);
+        config->vertex_size = A::vertex_state_bytes();
+        config->vertex_footprint = config->vertex_size +
+                                   A::vertex_stream_buffer_bytes();
+        config->max_streams = A::max_streams();
+        if (ext_mem_shuffle) {
+          config->max_streams += 2;
         }
+        config->max_buffers = A::max_buffers();
+        config->init();
+        if (vm.count("autotune") > 0) {
+          bool success = config->autotune();
+          if (!success) {
+            BOOST_LOG_TRIVIAL(fatal) << "Auto-tuning failed !";
+            config->dump_config();
+            exit(-1);
+          }
+        }
+        else {
+          config->manual();
+        }
+        config->dump_config();
+        /* Sanity checks */
+        //unsigned long machines = pt_slipstore.get < unsigned
+        //long > ("machines.count");
+        check_pow_2(config->super_partitions, "Super partitions must be power of two");
+        check_pow_2(config->cached_partitions, "Cached partitions must be power of two");
+        check_pow_2(config->tiles, "Tiles must be power of two");
+        //check_pow_2(config->processors, "Processors must be power of two");
+        //check_pow_2(machines, "Machines must be power of two");
+        check_pow_2(ext_fanout, "ext_fanout must be power of two");
       }
-      else {
-        config->manual();
-      }
-      config->dump_config();
-      /* Sanity checks */
-      //unsigned long machines = pt_slipstore.get < unsigned
-      //long > ("machines.count");
-      check_pow_2(config->super_partitions, "Super partitions must be power of two");
-      check_pow_2(config->cached_partitions, "Cached partitions must be power of two");
-      check_pow_2(config->tiles, "Tiles must be power of two");
-      //check_pow_2(config->processors, "Processors must be power of two");
-      //check_pow_2(machines, "Machines must be power of two");
-      check_pow_2(ext_fanout, "ext_fanout must be power of two");
-    }
 
   public:
-    volatile bool tile_copy_done;
-    unsigned long tile_copy_total_bytes;
+      volatile bool tile_copy_done;
+      unsigned long tile_copy_total_bytes;
 
-    void tile_copy(unsigned long partition,
-                   unsigned long tile) {
-      tile = 0;
+      void tile_copy(unsigned long partition,
+                     unsigned long tile) {
+        tile = 0;
 
-      // Are we striping vertices?
-      bool striping = vm.count("use_vertex_striping") > 0;
+        // Are we striping vertices?
+        bool striping = vm.count("use_vertex_striping") > 0;
 
-      // Permutation that defines the order in which to access the stripes
-      slipstore::cyclic permutation(slipstore::slipstore_client_fill->get_machines(),
-                                    slipstore::slipstore_client_fill->get_me());
+        // Permutation that defines the order in which to access the stripes
+        slipstore::cyclic permutation(slipstore::slipstore_client_fill->get_machines(),
+                                      slipstore::slipstore_client_fill->get_me());
 
-      // Tile size
-      const unsigned long tile_bytes = tile_size(partition, tile);
-      unsigned long fill_bytes = tile_bytes;
-      tile_copy_total_bytes += fill_bytes; // Stats counter?
+        // Tile size
+        const unsigned long tile_bytes = tile_size(partition, tile);
+        unsigned long fill_bytes = tile_bytes;
+        tile_copy_total_bytes += fill_bytes; // Stats counter?
 
-      // Number of machines
-      const unsigned long m = slipstore::slipstore_client_fill->get_machines();
+        // Number of machines
+        const unsigned long m = slipstore::slipstore_client_fill->get_machines();
 
-      // Master for this partition
-      const unsigned long start_mc = partition % m;
+        // Master for this partition
+        const unsigned long start_mc = partition % m;
 
-      // Offset in local buffer for the tile
-      unsigned long fill_offset = tile_offset(partition, tile);
+        // Offset in local buffer for the tile
+        unsigned long fill_offset = tile_offset(partition, tile);
 
-      // Chunk size
-      unsigned long slipchunk = slipstore::slipstore_client_fill->get_slipchunk();
+        // Chunk size
+        unsigned long slipchunk = slipstore::slipstore_client_fill->get_slipchunk();
 
-      // Request object to fill vertex state for a helpee tile
-      slipstore::slipstore_req_t req;
-      req.cmd = slipstore::CMD_SEEK_AND_FILL;
-      req.stream = slipstore::STREAM_VERTEX_STATE;
-      req.partition = partition;
-      req.tile = tile;
+        // Request object to fill vertex state for a helpee tile
+        slipstore::slipstore_req_t req;
+        req.cmd = slipstore::CMD_SEEK_AND_FILL;
+        req.stream = slipstore::STREAM_VERTEX_STATE;
+        req.partition = partition;
+        req.tile = tile;
 
-      // Remember the first element in the permutation so we know when we've done a complete round
-      unsigned long start_m = permutation.cyclic_next();
+        // Remember the first element in the permutation so we know when we've done a complete round
+        unsigned long start_m = permutation.cyclic_next();
 
-      // Offset in the remote file
-      unsigned long seek_offset = 0;
+        // Offset in the remote file
+        unsigned long seek_offset = 0;
 
-      unsigned long relative_id = 0;
+        unsigned long relative_id = 0;
 
-      // Fill loop
-      for (unsigned long i = permutation.cyclic_next(); // i = machine id for the next stripe (used only if vertex striping enabled)
-           fill_bytes > 0; // until buffer is filled
-           i = permutation.cyclic_next() // i goes through the permutation
-          ) {
+        // Fill loop
+        for (unsigned long i = permutation.cyclic_next(); // i = machine id for the next stripe (used only if vertex striping enabled)
+             fill_bytes > 0; // until buffer is filled
+             i = permutation.cyclic_next() // i goes through the permutation
+            ) {
 
-        req.offset = seek_offset;
-        req.size = (fill_bytes > slipchunk) ? slipchunk : fill_bytes;
+          req.offset = seek_offset;
+          req.size = (fill_bytes > slipchunk) ? slipchunk : fill_bytes;
 
-        // The relative id of this chunk so we know what the fill offset should be
-        relative_id = (i + m - start_mc) % m;
+          // The relative id of this chunk so we know what the fill offset should be
+          relative_id = (i + m - start_mc) % m;
 
-        // Assign offset for the fill in the local buffer as follows:
-        // - if striping: base + rounds * slipchunk * m + relative id * slipchunk
-        // - if not striping: base + seek_offset
-        fill_offset =
-            tile_offset(partition, tile) + (striping ? (seek_offset * m + relative_id * slipchunk) : seek_offset);
+          // Assign offset for the fill in the local buffer as follows:
+          // - if striping: base + rounds * slipchunk * m + relative id * slipchunk
+          // - if not striping: base + seek_offset
+          fill_offset =
+              tile_offset(partition, tile) + (striping ? (seek_offset * m + relative_id * slipchunk) : seek_offset);
 
-        // Access server i's store if striping, else server tile's store
-        // This can fail if we're in the last round! We check this as follows:
-        // - The round id is seek_offset / slipchunk.
-        // - The last round has id tile_size / (m * slipchunk)
-        // => If round id != last_round and the server access failed, die
-        if (!slipstore::slipstore_client_fill->access_store(&req, state_buffer->get_buffer() + fill_offset,
-                                                            striping ? i : tile)
-            && seek_offset / slipchunk != tile_bytes / (m * slipchunk)) {
-          BOOST_LOG_TRIVIAL(fatal) << "Unable to copy tile";
-          exit(-1);
+          // Access server i's store if striping, else server tile's store
+          // This can fail if we're in the last round! We check this as follows:
+          // - The round id is seek_offset / slipchunk.
+          // - The last round has id tile_size / (m * slipchunk)
+          // => If round id != last_round and the server access failed, die
+          if (!slipstore::slipstore_client_fill->access_store(&req, state_buffer->get_buffer() + fill_offset,
+                                                              striping ? i : tile)
+              && seek_offset / slipchunk != tile_bytes / (m * slipchunk)) {
+            BOOST_LOG_TRIVIAL(fatal) << "Unable to copy tile";
+            exit(-1);
+          }
+
+          if ((striping && i == start_m) ||
+              !striping) { seek_offset += req.size; } // increment offset in remote file only after each round (if striping) or for each request (if not striping)
+          fill_bytes -= req.size; // decrement target number of bytes
         }
 
-        if ((striping && i == start_m) ||
-            !striping) { seek_offset += req.size; } // increment offset in remote file only after each round (if striping) or for each request (if not striping)
-        fill_bytes -= req.size; // decrement target number of bytes
+        __sync_synchronize();
+        tile_copy_done = true;
       }
 
-      __sync_synchronize();
-      tile_copy_done = true;
-    }
-
-    void tile_copy_mem(unsigned long superp,
-                       unsigned long me,
-                       unsigned long mc) {
-      unsigned long tile_bytes = this->tile_size(superp, mc);
-      unsigned long slipchunk =
-          slipstore::slipstore_client_fill->get_slipchunk();
-      unsigned long tile_offset = this->tile_offset(superp, mc);
-      unsigned char *main_tile =
-          state_buffer->get_buffer() + tile_offset;
-      unsigned long io_bytes;
-      io_bytes = (tile_bytes > slipchunk) ? slipchunk : tile_bytes;
-      io_bytes = (io_bytes / config->vertex_size) * config->vertex_size;
-      // Issue first bit of I/O
-      if (io_bytes > 0) {
-        tile_copy_done = false;
-        tile_copy_partial(main_tile, mc, tile_offset, io_bytes);
-      }
-      while (tile_bytes) {
-        io_wait_time.start();
-        while (!tile_copy_done);
-        /// Issue next transfer
-        tile_bytes -= io_bytes;
-        tile_offset += io_bytes;
-        main_tile += io_bytes;
+      void tile_copy_mem(unsigned long superp,
+                         unsigned long me,
+                         unsigned long mc) {
+        unsigned long tile_bytes = this->tile_size(superp, mc);
+        unsigned long slipchunk =
+            slipstore::slipstore_client_fill->get_slipchunk();
+        unsigned long tile_offset = this->tile_offset(superp, mc);
+        unsigned char *main_tile =
+            state_buffer->get_buffer() + tile_offset;
+        unsigned long io_bytes;
         io_bytes = (tile_bytes > slipchunk) ? slipchunk : tile_bytes;
         io_bytes = (io_bytes / config->vertex_size) * config->vertex_size;
+        // Issue first bit of I/O
         if (io_bytes > 0) {
           tile_copy_done = false;
           tile_copy_partial(main_tile, mc, tile_offset, io_bytes);
         }
-      }
-
-    }
-
-
-    void tile_copy_partial(unsigned char *buffer,
-                           unsigned long mc,
-                           unsigned long offset,
-                           unsigned long bytes) {
-      slipstore::slipstore_req_t req;
-      tile_copy_total_bytes += bytes;
-      req.cmd = slipstore::CMD_FILL;
-      req.stream = slipstore::STREAM_MEMBUFFER;
-      req.partition = offset;
-      req.size = bytes;
-      if (!slipstore::slipstore_client_fill->
-          access_store(&req, buffer, mc)) {
-        BOOST_LOG_TRIVIAL(fatal) << "Unable to copy tile";
-        exit(-1);
-      }
-      __sync_synchronize();
-      tile_copy_done = true;
-    }
-
-
-    void inter_machine_barrier() {
-      null_barrier_work null_obj;
-      im_barrier_time.start();
-      slipstore::slipstore_client_barrier->in_progress = true;
-      slipstore::ioService.post
-          (boost::bind(&slipstore::client_barrier::work_barrier,
-                       slipstore::slipstore_client_barrier,
-                       &null_obj));
-      while (slipstore::slipstore_client_barrier->in_progress);
-      im_barrier_time.stop();
-    }
-
-    streamIO() {
-      config = new struct configuration();
-      ext_mem_shuffle = (vm.count("ext_mem_shuffle") > 0);
-      sorted_order      = (vm.count("sorted_order") > 0);
-      centralized_order = (vm.count("centralized_order") > 0);
-      ext_fanout = vm["ext_fanout"].as < unsigned
-      long > ();
-      make_config();
-      memory_buffer::initialize_freelist(config,
-                                         config->buffer_size,
-                                         config->max_buffers);
-      state_buffer = new memory_buffer(config,
-                                       config->max_state_bufsize());
-
-      streams = new slipstore::io(config->max_streams,
-                                  config->super_partitions,
-                                  config->tiles,
-                                  state_buffer->get_buffer());
-      slipstore::init(streams,
-		      config->vertex_state_buffer_size / config->tiles,
-		      config->super_partitions);
-      slipstore::slipstore_server->help_handle()->setup(config->super_partitions);
-      open_streams = 2; //vertex and input streams are auto opened
-      ingest_buffers = new memory_buffer *[config->max_streams];
-      for (unsigned long i = 0; i < config->max_streams; i++) {
-        ingest_buffers[i] = 0;
-      }
-      workers = new x_thread *[config->processors];
-      thread_array = new boost::thread *[config->processors];
-      cpu_state_array = new algorithm::per_processor_data *[config->processors];
-      for (unsigned long i = 0; i < config->processors; i++) {
-        cpu_state_array[i] = A::create_per_processor_data(i);
-        workers[i] = new x_thread(config, i, cpu_state_array[i]);
-        if (i > 0) {
-          thread_array[i] = new boost::thread(boost::ref(*workers[i]));
+        while (tile_bytes) {
+          io_wait_time.start();
+          while (!tile_copy_done);
+          /// Issue next transfer
+          tile_bytes -= io_bytes;
+          tile_offset += io_bytes;
+          main_tile += io_bytes;
+          io_bytes = (tile_bytes > slipchunk) ? slipchunk : tile_bytes;
+          io_bytes = (io_bytes / config->vertex_size) * config->vertex_size;
+          if (io_bytes > 0) {
+            tile_copy_done = false;
+            tile_copy_partial(main_tile, mc, tile_offset, io_bytes);
+          }
         }
+
       }
-      state_loaded = false;
-      take_checkpoints = (vm.count("checkpoints") > 0);
-      first_touch = new bool[config->super_partitions];
-      for (unsigned long i = 0; i < config->super_partitions; i++) {
-        first_touch[i] = true;
+
+
+      void tile_copy_partial(unsigned char *buffer,
+                             unsigned long mc,
+                             unsigned long offset,
+                             unsigned long bytes) {
+        slipstore::slipstore_req_t req;
+        tile_copy_total_bytes += bytes;
+        req.cmd = slipstore::CMD_FILL;
+        req.stream = slipstore::STREAM_MEMBUFFER;
+        req.partition = offset;
+        req.size = bytes;
+        if (!slipstore::slipstore_client_fill->
+            access_store(&req, buffer, mc)) {
+          BOOST_LOG_TRIVIAL(fatal) << "Unable to copy tile";
+          exit(-1);
+        }
+        __sync_synchronize();
+        tile_copy_done = true;
       }
-      unsigned long slipchunk =
-          slipstore::slipstore_client_fill->get_slipchunk();
-      tile_buffers[0] = new unsigned char[slipchunk];
-      tile_buffers[1] = new unsigned char[slipchunk];
-      tile_copy_total_bytes = 0;
-      if (ext_mem_shuffle) {
-        ext_tmps[0] = open_stream();
-        ext_tmps[1] = open_stream();
-      }
-      else {
-        ext_tmps[0] = ULONG_MAX;
-        ext_tmps[1] = ULONG_MAX;
-      }
-      // Wait for other machines to start up
-      inter_machine_barrier();
-    }
 
-    const configuration *get_config() {
-      return config;
-    }
 
-    void prep_state_filter(filter *state_filter)
-    {
-      for (unsigned long i = 0; i < config->cached_partitions; i++) {
-	state_filter->q(i);
-      }
-    }
-
-    unsigned long open_stream() {
-      unsigned long stream_id = (open_streams++);
-      return stream_id;
-    }
-
-    unsigned long tile_offset(unsigned long superp, unsigned long tile) {
-      unsigned long startp = config->tile2partition(superp, tile);
-      return state_buffer->index[0][startp];
-    }
-
-    unsigned long tile_size(unsigned long superp, unsigned long tile) {
-      unsigned long size;
-      unsigned long startp = config->tile2partition(superp, tile);
-      unsigned long tile_partitions = config->cached_partitions / config->tiles;
-      unsigned long stopp = startp + tile_partitions;
-      if (stopp < config->cached_partitions) {
-        size = state_buffer->index[0][stopp] - state_buffer->index[0][startp];
-      }
-      else {
-        size = state_buffer->index[0][stopp - 1] -
-               state_buffer->index[0][startp];
-        size += config->vertex_size * config->state_count(superp, stopp - 1);
-      }
-      return size;
-    }
-
-    void setup_pmap(unsigned long superp)
-    {
-      /* Setup pmap */
-      unsigned long v_so_far = 0;
-      for (unsigned long i = 0; i < config->cached_partitions; i++) {
-        //Count entries in the partition
-        state_buffer->index[0][i] = v_so_far;
-        v_so_far += config->vertex_size * config->state_count(superp, i);
-      }
-    }
-    
-    void state_load(unsigned long superp)
-    {
-      // Make sure state is uptodate
-      setup_pmap(superp);
-      unsigned long local_tile_size;
-      local_tile_size = tile_size(superp, 0);
-
-      if (first_touch[superp]) {
-        state_buffer->bufsize = local_tile_size;
-      }
-      else {
-	tile_copy_done    = false;
-	state_buffer->uptodate = false;
-	io_wait_time.start();
-	slipstore::ioService.post(boost::bind(&streamIO<A>::tile_copy,
-					      this,
-					      superp,
-					      0));
-	while (!tile_copy_done);
-	io_wait_time.stop();
-	state_buffer->bufsize = local_tile_size;
-	state_buffer->uptodate = true;
-      }
-      state_loaded = true;
-    }
-
-    void state_store(unsigned long superp) {
-      first_touch[superp] = false;
-      unsigned long local_tile_off = tile_offset(superp, 0);
-      tile_reset_work wk(slipstore::STREAM_VERTEX_STATE, superp);
-      wk.in_progress = true;
-      slipstore::ioService.post
-	(boost::bind(&tile_reset_work::do_it,
-		     &wk));
-      while (wk.in_progress);
-      state_buffer->uptodate = false;
-      slipstore::ioService.post(boost::bind(&memory_buffer::drain_tile,
-					    state_buffer,
-					    slipstore::slipstore_client_drain,
-					    superp,
-					    local_tile_off));
-      // Synchronous I/O
-      io_wait_time.start();
-      state_buffer->wait_uptodate();
-      io_wait_time.stop();
-      state_loaded = false;
-    }
-
-    bool stream_eof(int stream) {
-      bool empty;
-      check_empty_work wk(stream, streams);
-      wk.in_progress = true;
-      inter_machine_barrier();
-      slipstore::ioService.post
-          (boost::bind(&check_empty_work::do_it,
-                       &wk));
-      while (wk.in_progress);
-      empty = wk.empty;
-      inter_machine_barrier();
-      return empty;
-    }
-
-    void send_semup(unsigned long mc) {
-      semup_work wk(mc);
-      wk.in_progress = true;
-      slipstore::ioService.post
-          (boost::bind(&semup_work::do_it,
-                       &wk));
-      while (wk.in_progress);
-    }
-
-    void terminate() {
-      workers[0]->terminate = true;
-      (*workers[0])();
-
-      for (unsigned long i = 1; i < config->processors; i++) {
-        thread_array[i]->join();
-      }
-      inter_machine_barrier(); // avoid killing servers while messages inflight
-      slipstore::shutdown();
-      delete streams;
-      struct rusage ru;
-      (void) getrusage(RUSAGE_SELF, &ru);
-      BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MAX_RSS_KB " << ru.ru_maxrss;
-      BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MINFLT " << ru.ru_minflt;
-      BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MAJFLT " << ru.ru_majflt;
-      BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MAJFLT " << ru.ru_majflt;
-      BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::INBLK " << ru.ru_inblock;
-      BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::OUBLK " << ru.ru_oublock;
-      BOOST_LOG_TRIVIAL(info) << "CORE::UTILS::BYTES_READ " << stat_bytes_read;
-      BOOST_LOG_TRIVIAL(info) << "CORE::UTILS::BYTES_WRITTEN " <<
-      stat_bytes_written;
-      BOOST_LOG_TRIVIAL(info) << "CORE::UTILS::TILE_COPY_BYTES " <<
-      tile_copy_total_bytes;
-      io_wait_time.print("CORE::TIME::IO_WAIT");
-      tile_copy_time.print("CORE::TIME_TILE_COPY");
-      tile_merge_time.print("CORE::TIME_TILE_MERGE");
-      processing_stolen_time.print("CORE::TIME_PROCESSING_STOLEN");
-      merge_wait_time.print("CORE::TIME_MERGE_WAIT");
-      im_barrier_time.print("CORE::TIME_ALL_MC_BARRIER");
-    }
-
-    void rewind_stream(unsigned long stream) {
-      for (unsigned long i = 0; i < config->super_partitions; i++) {
-        rewind_barrier_work rewind_obj(stream, i, streams);
+      void inter_machine_barrier() {
+        null_barrier_work null_obj;
+        im_barrier_time.start();
         slipstore::slipstore_client_barrier->in_progress = true;
         slipstore::ioService.post
             (boost::bind(&slipstore::client_barrier::work_barrier,
                          slipstore::slipstore_client_barrier,
-                         &rewind_obj));
+                         &null_obj));
+        while (slipstore::slipstore_client_barrier->in_progress);
+        im_barrier_time.stop();
+      }
+
+      streamIO() {
+        config = new struct configuration();
+        ext_mem_shuffle = (vm.count("ext_mem_shuffle") > 0);
+        sorted_order = (vm.count("sorted_order") > 0);
+        centralized_order = (vm.count("centralized_order") > 0);
+        ext_fanout = vm["ext_fanout"].as < unsigned
+        long > ();
+        make_config();
+        memory_buffer::initialize_freelist(config,
+                                           config->buffer_size,
+                                           config->max_buffers);
+        state_buffer = new memory_buffer(config,
+                                         config->max_state_bufsize());
+
+        streams = new slipstore::io(config->max_streams,
+                                    config->super_partitions,
+                                    config->tiles,
+                                    state_buffer->get_buffer());
+        slipstore::init(streams,
+                        config->vertex_state_buffer_size / config->tiles,
+                        config->super_partitions);
+        slipstore::slipstore_server->help_handle()->setup(config->super_partitions);
+        open_streams = 2; //vertex and input streams are auto opened
+        ingest_buffers = new memory_buffer *[config->max_streams];
+        for (unsigned long i = 0; i < config->max_streams; i++) {
+          ingest_buffers[i] = 0;
+        }
+        workers = new x_thread *[config->processors];
+        thread_array = new boost::thread *[config->processors];
+        cpu_state_array = new algorithm::per_processor_data *[config->processors];
+        for (unsigned long i = 0; i < config->processors; i++) {
+          cpu_state_array[i] = A::create_per_processor_data(i);
+          workers[i] = new x_thread(config, i, cpu_state_array[i]);
+          if (i > 0) {
+            thread_array[i] = new boost::thread(boost::ref(*workers[i]));
+          }
+        }
+        state_loaded = false;
+        take_checkpoints = (vm.count("checkpoints") > 0);
+        first_touch = new bool[config->super_partitions];
+        for (unsigned long i = 0; i < config->super_partitions; i++) {
+          first_touch[i] = true;
+        }
+        unsigned long slipchunk =
+            slipstore::slipstore_client_fill->get_slipchunk();
+        tile_buffers[0] = new unsigned char[slipchunk];
+        tile_buffers[1] = new unsigned char[slipchunk];
+        tile_copy_total_bytes = 0;
+        if (ext_mem_shuffle) {
+          ext_tmps[0] = open_stream();
+          ext_tmps[1] = open_stream();
+        }
+        else {
+          ext_tmps[0] = ULONG_MAX;
+          ext_tmps[1] = ULONG_MAX;
+        }
+        // Wait for other machines to start up
+        inter_machine_barrier();
+      }
+
+      const configuration *get_config() {
+        return config;
+      }
+
+      void prep_state_filter(filter *state_filter) {
+        for (unsigned long i = 0; i < config->cached_partitions; i++) {
+          state_filter->q(i);
+        }
+      }
+
+      unsigned long open_stream() {
+        unsigned long stream_id = (open_streams++);
+        return stream_id;
+      }
+
+      unsigned long tile_offset(unsigned long superp, unsigned long tile) {
+        unsigned long startp = config->tile2partition(superp, tile);
+        return state_buffer->index[0][startp];
+      }
+
+      unsigned long tile_size(unsigned long superp, unsigned long tile) {
+        unsigned long size;
+        unsigned long startp = config->tile2partition(superp, tile);
+        unsigned long tile_partitions = config->cached_partitions / config->tiles;
+        unsigned long stopp = startp + tile_partitions;
+        if (stopp < config->cached_partitions) {
+          size = state_buffer->index[0][stopp] - state_buffer->index[0][startp];
+        }
+        else {
+          size = state_buffer->index[0][stopp - 1] -
+                 state_buffer->index[0][startp];
+          size += config->vertex_size * config->state_count(superp, stopp - 1);
+        }
+        return size;
+      }
+
+      void setup_pmap(unsigned long superp) {
+        /* Setup pmap */
+        unsigned long v_so_far = 0;
+        for (unsigned long i = 0; i < config->cached_partitions; i++) {
+          //Count entries in the partition
+          state_buffer->index[0][i] = v_so_far;
+          v_so_far += config->vertex_size * config->state_count(superp, i);
+        }
+      }
+
+      void state_load(unsigned long superp) {
+        // Make sure state is uptodate
+        setup_pmap(superp);
+        unsigned long local_tile_size;
+        local_tile_size = tile_size(superp, 0);
+
+        if (first_touch[superp]) {
+          state_buffer->bufsize = local_tile_size;
+        }
+        else {
+          tile_copy_done = false;
+          state_buffer->uptodate = false;
+          io_wait_time.start();
+          slipstore::ioService.post(boost::bind(&streamIO<A>::tile_copy,
+                                                this,
+                                                superp,
+                                                0));
+          while (!tile_copy_done);
+          io_wait_time.stop();
+          state_buffer->bufsize = local_tile_size;
+          state_buffer->uptodate = true;
+        }
+        state_loaded = true;
+      }
+
+      void state_store(unsigned long superp) {
+        first_touch[superp] = false;
+        unsigned long local_tile_off = tile_offset(superp, 0);
+        tile_reset_work wk(slipstore::STREAM_VERTEX_STATE, superp);
+        wk.in_progress = true;
+        slipstore::ioService.post
+            (boost::bind(&tile_reset_work::do_it,
+                         &wk));
+        while (wk.in_progress);
+        state_buffer->uptodate = false;
+        slipstore::ioService.post(boost::bind(&memory_buffer::drain_tile,
+                                              state_buffer,
+                                              slipstore::slipstore_client_drain,
+                                              superp,
+                                              local_tile_off));
+        // Synchronous I/O
+        io_wait_time.start();
+        state_buffer->wait_uptodate();
+        io_wait_time.stop();
+        state_loaded = false;
+      }
+
+      bool stream_eof(int stream) {
+        bool empty;
+        check_empty_work wk(stream, streams);
+        wk.in_progress = true;
+        inter_machine_barrier();
+        slipstore::ioService.post
+            (boost::bind(&check_empty_work::do_it,
+                         &wk));
+        while (wk.in_progress);
+        empty = wk.empty;
+        inter_machine_barrier();
+        return empty;
+      }
+
+      void send_semup(unsigned long mc) {
+        semup_work wk(mc);
+        wk.in_progress = true;
+        slipstore::ioService.post
+            (boost::bind(&semup_work::do_it,
+                         &wk));
+        while (wk.in_progress);
+      }
+
+      void terminate() {
+        workers[0]->terminate = true;
+        (*workers[0])();
+
+        for (unsigned long i = 1; i < config->processors; i++) {
+          thread_array[i]->join();
+        }
+        inter_machine_barrier(); // avoid killing servers while messages inflight
+        slipstore::shutdown();
+        delete streams;
+        struct rusage ru;
+        (void) getrusage(RUSAGE_SELF, &ru);
+        BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MAX_RSS_KB " << ru.ru_maxrss;
+        BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MINFLT " << ru.ru_minflt;
+        BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MAJFLT " << ru.ru_majflt;
+        BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::MAJFLT " << ru.ru_majflt;
+        BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::INBLK " << ru.ru_inblock;
+        BOOST_LOG_TRIVIAL(info) << "CORE::RUSAGE::OUBLK " << ru.ru_oublock;
+        BOOST_LOG_TRIVIAL(info) << "CORE::UTILS::BYTES_READ " << stat_bytes_read;
+        BOOST_LOG_TRIVIAL(info) << "CORE::UTILS::BYTES_WRITTEN " <<
+        stat_bytes_written;
+        BOOST_LOG_TRIVIAL(info) << "CORE::UTILS::TILE_COPY_BYTES " <<
+        tile_copy_total_bytes;
+        io_wait_time.print("CORE::TIME::IO_WAIT");
+        tile_copy_time.print("CORE::TIME_TILE_COPY");
+        tile_merge_time.print("CORE::TIME_TILE_MERGE");
+        processing_stolen_time.print("CORE::TIME_PROCESSING_STOLEN");
+        merge_wait_time.print("CORE::TIME_MERGE_WAIT");
+        im_barrier_time.print("CORE::TIME_ALL_MC_BARRIER");
+      }
+
+      void rewind_stream(unsigned long stream) {
+        for (unsigned long i = 0; i < config->super_partitions; i++) {
+          rewind_barrier_work rewind_obj(stream, i, streams);
+          slipstore::slipstore_client_barrier->in_progress = true;
+          slipstore::ioService.post
+              (boost::bind(&slipstore::client_barrier::work_barrier,
+                           slipstore::slipstore_client_barrier,
+                           &rewind_obj));
+          while (slipstore::slipstore_client_barrier->in_progress);
+        }
+      }
+
+      void reset_stream(unsigned long stream, unsigned long super_partition) {
+        reset_barrier_work reset_obj(stream, super_partition, streams);
+        slipstore::slipstore_client_barrier->in_progress = true;
+        slipstore::ioService.post
+            (boost::bind(&slipstore::client_barrier::work_barrier,
+                         slipstore::slipstore_client_barrier,
+                         &reset_obj));
         while (slipstore::slipstore_client_barrier->in_progress);
       }
-    }
 
-    void reset_stream(unsigned long stream, unsigned long super_partition) {
-      reset_barrier_work reset_obj(stream, super_partition, streams);
-      slipstore::slipstore_client_barrier->in_progress = true;
-      slipstore::ioService.post
-          (boost::bind(&slipstore::client_barrier::work_barrier,
-                       slipstore::slipstore_client_barrier,
-                       &reset_obj));
-      while (slipstore::slipstore_client_barrier->in_progress);
-    }
+      template<typename B, typename IN, typename OUT>
+      friend
+      void do_stream_internal(streamIO<B> *sio,
+                              unsigned long superp,
+                              unsigned long tile,
+                              unsigned long stream_in,
+                              unsigned long stream_out,
+                              filter *override_input_filter,
+                              bool sync);
 
-    template<typename B, typename IN, typename OUT>
-    friend
-    void do_stream_internal(streamIO<B> *sio,
-                            unsigned long superp,
-                            unsigned long tile,
-                            unsigned long stream_in,
-                            unsigned long stream_out,
-                            filter *override_input_filter,
-			    bool sync);
-    template<typename B, typename OBJ>
-    friend
-    void do_spcopy(streamIO<B> *sio,
-                   unsigned long stream,
-                   unsigned long superp,
-                   unsigned long tile,
-                   unsigned long stream_out);
+      template<typename B, typename OBJ>
+      friend
+      void do_spcopy(streamIO<B> *sio,
+                     unsigned long stream,
+                     unsigned long superp,
+                     unsigned long tile,
+                     unsigned long stream_out);
 
-    template<typename B, typename IN, typename OUT>
-    friend
-    bool do_stream_skip(streamIO<B> *sio,
-                   unsigned long stream_in,
-                   unsigned long stream_out,
-                   filter *override_input_filter,
-                   bool sync,
-                   bool reset);
+      template<typename B, typename IN, typename OUT>
+      friend
+      bool do_stream_skip(streamIO<B> *sio,
+                          unsigned long stream_in,
+                          unsigned long stream_out,
+                          filter *override_input_filter,
+                          bool sync,
+                          bool reset);
 
-    template<typename B, typename IN, typename OUT>
-    friend
-    bool do_init_stream(streamIO<B> *sio,
-			unsigned long stream_in,
-			unsigned long stream_out);
+      template<typename B, typename IN, typename OUT>
+      friend
+      bool do_init_stream(streamIO<B> *sio,
+                          unsigned long stream_in,
+                          unsigned long stream_out);
 
-    template<typename B>
-    friend
-    bool do_cpu(streamIO<B> *sio, unsigned long superp);
+      template<typename B>
+      friend
+      bool do_cpu(streamIO<B> *sio, unsigned long superp);
 
-    template<typename B>
-    friend
-    void do_state_iter(streamIO<B> *sio);
+      template<typename B>
+      friend
+      void do_state_iter(streamIO<B> *sio);
 
-    template<typename B>
-    friend
-    bool ingest(streamIO<B> *sio,
-                unsigned long stream_in,
-                ingest_t *ingest_segment);
+      template<typename B>
+      friend
+      bool ingest(streamIO<B> *sio,
+                  unsigned long stream_in,
+                  ingest_t *ingest_segment);
 
-    template<typename B>
-    friend
-    void merge_ingest(streamIO<B> *sio, unsigned long stream);
+      template<typename B>
+      friend
+      void merge_ingest(streamIO<B> *sio, unsigned long stream);
 
-    template<typename B>
-    friend
-    void sync_tile(streamIO<B> *sio,
-                   unsigned long superp,
-		   unsigned long mc);
+      template<typename B>
+      friend
+      void sync_tile(streamIO<B> *sio,
+                     unsigned long superp,
+                     unsigned long mc);
 
-    template<typename B>
-    friend
-    bool load_checkpoint(streamIO<B> *sio, B *app);
+      template<typename B>
+      friend
+      bool load_checkpoint(streamIO<B> *sio, B *app);
 
-    template<typename B>
-    friend
-    void take_checkpoint(streamIO<B> *sio, B *app);
+      template<typename B>
+      friend
+      void take_checkpoint(streamIO<B> *sio, B *app);
   };
 
 #define SETUP_STREAMOUT()            \
@@ -1159,9 +1154,9 @@ namespace x_lib {
     work_item.state = sio->state_buffer;
     work_item.ingest = NULL;
     work_item.local_tile = (
-    (superp % slipstore::slipstore_client_fill->get_machines())==
-    slipstore::slipstore_client_fill->get_me()
-			    );
+        (superp % slipstore::slipstore_client_fill->get_machines()) ==
+        slipstore::slipstore_client_fill->get_me()
+    );
     if (stream_in != ULONG_MAX) {
       if (sio->ingest_buffers[stream_in] != NULL) {
         work_item.ingest = sio->ingest_buffers[stream_in];
@@ -1423,27 +1418,26 @@ namespace x_lib {
 
   template<typename A, typename IN, typename OUT>
   static bool do_stream_skip(streamIO<A> *sio,
-                        unsigned long stream_in,
-                        unsigned long stream_out,
-                        filter *override_input_filter,
-                        bool sync,
-                        bool reset)
-  {
+                             unsigned long stream_in,
+                             unsigned long stream_out,
+                             filter *override_input_filter,
+                             bool sync,
+                             bool reset) {
     const bool log_phases = vm.count("log_phases") > 0;
 
     const unsigned long me = slipstore::slipstore_client_fill->get_me();
     const unsigned long m = slipstore::slipstore_client_fill->get_machines();
     order_work order_wk;
-    
+
     bool reduce_result = true;
     slipstore::slipstore_server->help_handle()->reset();
-    if(sio->sorted_order) {
-      order_wk.cmd    = slipstore::CMD_ORDER_INIT;
+    if (sio->sorted_order) {
+      order_wk.cmd = slipstore::CMD_ORDER_INIT;
       order_wk.stream = stream_in;
       order_wk.in_progress = true;
       slipstore::ioService.post(boost::bind(&order_work::do_it,
-					  &order_wk));
-      while(order_wk.in_progress);
+                                            &order_wk));
+      while (order_wk.in_progress);
     }
     // Make sure everyone is ready
     sio->inter_machine_barrier();
@@ -1453,55 +1447,55 @@ namespace x_lib {
     if (sio->ext_mem_shuffle) {
       visible_bits = configuration::ext_fanout_bits;
       if (visible_bits > configuration::ext_mem_bits) {
-	visible_bits = configuration::ext_mem_bits;
+        visible_bits = configuration::ext_mem_bits;
       }
     }
     if (stream_out != ULONG_MAX) {
       if (sio->ext_mem_shuffle) {
-	map_spshift_wrap::map_spshift =
-	  configuration::ext_mem_bits - visible_bits;
-	if (map_spshift_wrap::map_spshift != 0) {
-	  use_stream_out = sio->ext_tmps[0];
-	}
-	else {
-	  use_stream_out = stream_out;
-	}
+        map_spshift_wrap::map_spshift =
+            configuration::ext_mem_bits - visible_bits;
+        if (map_spshift_wrap::map_spshift != 0) {
+          use_stream_out = sio->ext_tmps[0];
+        }
+        else {
+          use_stream_out = stream_out;
+        }
       }
       else {
-	use_stream_out = stream_out;
-	map_spshift_wrap::map_spshift = 0;
-        }
+        use_stream_out = stream_out;
+        map_spshift_wrap::map_spshift = 0;
+      }
     }
     else {
       use_stream_out = ULONG_MAX;
     }
-    
-    
+
+
     // First do all of my work
     //while(true) {
-    for(unsigned long index = 0;
-	index <  sio->get_config()->super_partitions;
-	index++) {
+    for (unsigned long index = 0;
+         index < sio->get_config()->super_partitions;
+         index++) {
       unsigned long partition;
-      if(sio->sorted_order) {
-	order_wk.cmd    = slipstore::CMD_ORDER_NEXT;
-	order_wk.index     = index;
-	order_wk.master    = sio->centralized_order ? 0:me;
-	order_wk.in_progress = true;
-	slipstore::ioService.post(boost::bind(&order_work::do_it,
-					      &order_wk));
-	while(order_wk.in_progress);
-	partition = order_wk.order_next;
+      if (sio->sorted_order) {
+        order_wk.cmd = slipstore::CMD_ORDER_NEXT;
+        order_wk.index = index;
+        order_wk.master = sio->centralized_order ? 0 : me;
+        order_wk.in_progress = true;
+        slipstore::ioService.post(boost::bind(&order_work::do_it,
+                                              &order_wk));
+        while (order_wk.in_progress);
+        partition = order_wk.order_next;
       }
       else {
-	partition = index;
+        partition = index;
       }
-      if(partition % sio->get_config()->super_partitions != me) {
-	continue;
+      if (partition % sio->get_config()->super_partitions != me) {
+        continue;
       }
 
-      if(log_phases) {
-        if(sync) {
+      if (log_phases) {
+        if (sync) {
           BOOST_LOG_TRIVIAL(info)
           << clock::timestamp()
           << " Started gather ";
@@ -1517,8 +1511,8 @@ namespace x_lib {
       //partition += m) {
       sio->state_load(partition);
       do_stream_internal<A, IN, OUT>(sio, partition, 0, stream_in,
-				     use_stream_out,
-				     override_input_filter, sync);
+                                     use_stream_out,
+                                     override_input_filter, sync);
       reduce_result = reduce_result &&
                       sio->cpu_state_array[0]->reduce(sio->cpu_state_array,
                                                       sio->config->processors);
@@ -1526,25 +1520,25 @@ namespace x_lib {
       // Stop accepting help
       slipstore::slipstore_server->help_handle()->close(partition);
       // Synchronize with helpers for sync
-      if(sync) {
-	while(true) {
-	  unsigned long mc = slipstore::slipstore_server->help_handle()->next_helper(partition);
-	  if(mc == ULONG_MAX) {
-	    break;
-	  }
-    sio->merge_wait_time.start();
-	  slipstore::slipstore_server->help_handle()->sem_down(mc);
-    sio->merge_wait_time.stop();
-	  sio->tile_merge_time.start();
-	  sync_tile<A>(sio, partition, mc);
-	  sio->tile_merge_time.stop();
-	  // Release mc
-	  sio->send_semup(mc);
-	}
-	sio->state_store(partition);
+      if (sync) {
+        while (true) {
+          unsigned long mc = slipstore::slipstore_server->help_handle()->next_helper(partition);
+          if (mc == ULONG_MAX) {
+            break;
+          }
+          sio->merge_wait_time.start();
+          slipstore::slipstore_server->help_handle()->sem_down(mc);
+          sio->merge_wait_time.stop();
+          sio->tile_merge_time.start();
+          sync_tile<A>(sio, partition, mc);
+          sio->tile_merge_time.stop();
+          // Release mc
+          sio->send_semup(mc);
+        }
+        sio->state_store(partition);
       }
-      if(log_phases) {
-        if(sync) {
+      if (log_phases) {
+        if (sync) {
           BOOST_LOG_TRIVIAL(info)
           << clock::timestamp()
           << " Completed gather ";
@@ -1559,113 +1553,113 @@ namespace x_lib {
     // Help others
     if (stream_in != ULONG_MAX) {
       //  while(true) {
-      for(unsigned long index = 0;
-	  index <  sio->get_config()->super_partitions;
-	  index++) {
-	unsigned long partition;
-	if(sio->sorted_order) {
-	  order_wk.cmd    = slipstore::CMD_ORDER_NEXT;
-	  order_wk.index     = index;
-	  order_wk.master    = sio->centralized_order ? 0:me;
-	  order_wk.in_progress = true;
-	  slipstore::ioService.post(boost::bind(&order_work::do_it,
-						&order_wk));
-	  while(order_wk.in_progress);
-	  partition = order_wk.order_next;
-	}
-	else {
-	  partition = index;
-	}
-	//for(unsigned long partition=0;
-	//  partition < sio->get_config()->super_partitions;
-	//  partition ++) {
-	unsigned long beneficiary = partition % m;
-	if (beneficiary  == me) {
-	  continue;
-	}
-	help_offer offer(stream_in, partition, beneficiary, sync);
-	slipstore::ioService.post(boost::bind(&help_offer::make_offer,
-					      &offer));
-	sio->io_wait_time.start();
-	while (!offer.done);
-	sio->io_wait_time.stop();
-	if (offer.accepted) {
-    if(log_phases) {
-        BOOST_LOG_TRIVIAL(info)
-        << clock::timestamp()
-        << " Started helping " << beneficiary << " ";
-    }
-	  // Offer of help accepted
-	  // fill the sp
-	  sio->tile_copy_time.start();
-	  sio->tile_copy_done = false;
+      for (unsigned long index = 0;
+           index < sio->get_config()->super_partitions;
+           index++) {
+        unsigned long partition;
+        if (sio->sorted_order) {
+          order_wk.cmd = slipstore::CMD_ORDER_NEXT;
+          order_wk.index = index;
+          order_wk.master = sio->centralized_order ? 0 : me;
+          order_wk.in_progress = true;
+          slipstore::ioService.post(boost::bind(&order_work::do_it,
+                                                &order_wk));
+          while (order_wk.in_progress);
+          partition = order_wk.order_next;
+        }
+        else {
+          partition = index;
+        }
+        //for(unsigned long partition=0;
+        //  partition < sio->get_config()->super_partitions;
+        //  partition ++) {
+        unsigned long beneficiary = partition % m;
+        if (beneficiary == me) {
+          continue;
+        }
+        help_offer offer(stream_in, partition, beneficiary, sync);
+        slipstore::ioService.post(boost::bind(&help_offer::make_offer,
+                                              &offer));
+        sio->io_wait_time.start();
+        while (!offer.done);
+        sio->io_wait_time.stop();
+        if (offer.accepted) {
+          if (log_phases) {
+            BOOST_LOG_TRIVIAL(info)
+            << clock::timestamp()
+            << " Started helping " << beneficiary << " ";
+          }
+          // Offer of help accepted
+          // fill the sp
+          sio->tile_copy_time.start();
+          sio->tile_copy_done = false;
 
-	  // Setup the state buffer index
+          // Setup the state buffer index
           sio->setup_pmap(partition);
           sio->state_buffer->bufsize = sio->tile_size(partition, 0);
 
-	  slipstore::ioService.post(boost::bind(&streamIO<A>::tile_copy,
-						sio,
-						partition,
-						0));
-	  sio->io_wait_time.start();
-	  while (!sio->tile_copy_done);
-	  sio->io_wait_time.stop();
-	  sio->tile_copy_time.stop();
+          slipstore::ioService.post(boost::bind(&streamIO<A>::tile_copy,
+                                                sio,
+                                                partition,
+                                                0));
+          sio->io_wait_time.start();
+          while (!sio->tile_copy_done);
+          sio->io_wait_time.stop();
+          sio->tile_copy_time.stop();
 
-	  // Now do the stream
+          // Now do the stream
 
-    sio->processing_stolen_time.start();
-	  do_stream_internal<A, IN, OUT>(sio, partition,
-					 0, stream_in,
-					 use_stream_out,
-					 override_input_filter, sync);
-    sio->processing_stolen_time.stop();
-	  if(sync) { 
-	    // Signal completion
-	    sio->send_semup(beneficiary);
-	    // Wait for the merge to happen
-      sio->merge_wait_time.start();
-	    slipstore::slipstore_server->help_handle()->sem_down(beneficiary);
-      sio->merge_wait_time.stop();
-	  }
-    if(log_phases) {
-      BOOST_LOG_TRIVIAL(info)
-      << clock::timestamp()
-      << " Completed helping " << beneficiary << " ";
-    }
-	}
+          sio->processing_stolen_time.start();
+          do_stream_internal<A, IN, OUT>(sio, partition,
+                                         0, stream_in,
+                                         use_stream_out,
+                                         override_input_filter, sync);
+          sio->processing_stolen_time.stop();
+          if (sync) {
+            // Signal completion
+            sio->send_semup(beneficiary);
+            // Wait for the merge to happen
+            sio->merge_wait_time.start();
+            slipstore::slipstore_server->help_handle()->sem_down(beneficiary);
+            sio->merge_wait_time.stop();
+          }
+          if (log_phases) {
+            BOOST_LOG_TRIVIAL(info)
+            << clock::timestamp()
+            << " Completed helping " << beneficiary << " ";
+          }
+        }
       }
     }
-    
-    if(reset) {
-      for(unsigned long partition=0;
-	  partition < sio->get_config()->super_partitions;
-	  partition ++) {
-	sio->reset_stream(stream_in, partition); // Also a barrier
+
+    if (reset) {
+      for (unsigned long partition = 0;
+           partition < sio->get_config()->super_partitions;
+           partition++) {
+        sio->reset_stream(stream_in, partition); // Also a barrier
       }
     }
     if (stream_out != ULONG_MAX && sio->ext_mem_shuffle) {
       unsigned long input = 0;
       while (visible_bits < configuration::ext_mem_bits) {
-	visible_bits += configuration::ext_fanout_bits;
-	if (visible_bits > configuration::ext_mem_bits) {
-	  visible_bits = configuration::ext_mem_bits;
-	}
-	map_spshift_wrap::map_spshift =
-	  configuration::ext_mem_bits - visible_bits;
-	sio->rewind_stream(sio->ext_tmps[input]); // also a barrier
-	for (unsigned long i = 0; i < sio->get_config()->super_partitions; i++) {
-	  for (unsigned long j = 0; j < sio->get_config()->tiles; j++) {
-	    do_spcopy<A, OUT>(sio,
-			      sio->ext_tmps[input],
-			      i, j,
-			      visible_bits == configuration::ext_mem_bits ?
-			      stream_out : sio->ext_tmps[1 - input]);
-	  }
-	  sio->reset_stream(sio->ext_tmps[input], i);
-	}
-	input = 1 - input;
+        visible_bits += configuration::ext_fanout_bits;
+        if (visible_bits > configuration::ext_mem_bits) {
+          visible_bits = configuration::ext_mem_bits;
+        }
+        map_spshift_wrap::map_spshift =
+            configuration::ext_mem_bits - visible_bits;
+        sio->rewind_stream(sio->ext_tmps[input]); // also a barrier
+        for (unsigned long i = 0; i < sio->get_config()->super_partitions; i++) {
+          for (unsigned long j = 0; j < sio->get_config()->tiles; j++) {
+            do_spcopy<A, OUT>(sio,
+                              sio->ext_tmps[input],
+                              i, j,
+                              visible_bits == configuration::ext_mem_bits ?
+                              stream_out : sio->ext_tmps[1 - input]);
+          }
+          sio->reset_stream(sio->ext_tmps[input], i);
+        }
+        input = 1 - input;
       }
     }
     sio->inter_machine_barrier(); // All done
@@ -1675,9 +1669,8 @@ namespace x_lib {
 
   template<typename A, typename IN, typename OUT>
   static bool do_init_stream(streamIO<A> *sio,
-			     unsigned long stream_in,
-			     unsigned long stream_out)
-  {
+                             unsigned long stream_in,
+                             unsigned long stream_out) {
     // Make sure everyone is ready
     slipstore::slipstore_server->help_handle()->reset();
     sio->setup_pmap(0);
@@ -1688,84 +1681,84 @@ namespace x_lib {
     if (sio->ext_mem_shuffle) {
       visible_bits = configuration::ext_fanout_bits;
       if (visible_bits > configuration::ext_mem_bits) {
-	visible_bits = configuration::ext_mem_bits;
+        visible_bits = configuration::ext_mem_bits;
       }
     }
     if (stream_out != ULONG_MAX) {
       if (sio->ext_mem_shuffle) {
-	map_spshift_wrap::map_spshift =
-	  configuration::ext_mem_bits - visible_bits;
-	if (map_spshift_wrap::map_spshift != 0) {
-	  use_stream_out = sio->ext_tmps[0];
-	}
-	else {
-	  use_stream_out = stream_out;
-	}
+        map_spshift_wrap::map_spshift =
+            configuration::ext_mem_bits - visible_bits;
+        if (map_spshift_wrap::map_spshift != 0) {
+          use_stream_out = sio->ext_tmps[0];
+        }
+        else {
+          use_stream_out = stream_out;
+        }
       }
       else {
-	use_stream_out = stream_out;
-	map_spshift_wrap::map_spshift = 0;
+        use_stream_out = stream_out;
+        map_spshift_wrap::map_spshift = 0;
       }
     }
     else {
       use_stream_out = ULONG_MAX;
     }
     do_stream_internal<A, IN, OUT>(sio, 0, 0, stream_in, use_stream_out,
-				   NULL, false);
+                                   NULL, false);
     sio->inter_machine_barrier();
 
     if (stream_out != ULONG_MAX && sio->ext_mem_shuffle) {
       unsigned long input = 0;
       while (visible_bits < configuration::ext_mem_bits) {
-	visible_bits += configuration::ext_fanout_bits;
-	if (visible_bits > configuration::ext_mem_bits) {
-	  visible_bits = configuration::ext_mem_bits;
-	}
-	map_spshift_wrap::map_spshift =
-	  configuration::ext_mem_bits - visible_bits;
-	sio->rewind_stream(sio->ext_tmps[input]);
-	for (unsigned long i = 0; i < sio->get_config()->super_partitions; i++) {
-	  for (unsigned long j = 0; j < sio->get_config()->tiles; j++) {
-	    do_spcopy<A, OUT>(sio,
-			      sio->ext_tmps[input],
-			      i, j,
-			      visible_bits == configuration::ext_mem_bits ?
-			      stream_out : sio->ext_tmps[1 - input]);
-	  }
-	  sio->reset_stream(sio->ext_tmps[input], i);
-	}
-	input = 1 - input;
+        visible_bits += configuration::ext_fanout_bits;
+        if (visible_bits > configuration::ext_mem_bits) {
+          visible_bits = configuration::ext_mem_bits;
+        }
+        map_spshift_wrap::map_spshift =
+            configuration::ext_mem_bits - visible_bits;
+        sio->rewind_stream(sio->ext_tmps[input]);
+        for (unsigned long i = 0; i < sio->get_config()->super_partitions; i++) {
+          for (unsigned long j = 0; j < sio->get_config()->tiles; j++) {
+            do_spcopy<A, OUT>(sio,
+                              sio->ext_tmps[input],
+                              i, j,
+                              visible_bits == configuration::ext_mem_bits ?
+                              stream_out : sio->ext_tmps[1 - input]);
+          }
+          sio->reset_stream(sio->ext_tmps[input], i);
+        }
+        input = 1 - input;
       }
       sio->inter_machine_barrier();
     }
     return false;
   }
-  
+
 
   class DUMMY_IN {
   public:
-    static unsigned long item_size() {
-      BOOST_ASSERT_MSG(false, "Should not be called !");
-      return 0;
-    }
+      static unsigned long item_size() {
+        BOOST_ASSERT_MSG(false, "Should not be called !");
+        return 0;
+      }
 
-    static unsigned long key(unsigned char *buffer) {
-      BOOST_ASSERT_MSG(false, "Should not be called !");
-      return 0;
-    }
+      static unsigned long key(unsigned char *buffer) {
+        BOOST_ASSERT_MSG(false, "Should not be called !");
+        return 0;
+      }
   };
 
   class DUMMY_OUT {
   public:
-    static unsigned long item_size() {
-      BOOST_ASSERT_MSG(false, "Should not be called !");
-      return 0;
-    }
+      static unsigned long item_size() {
+        BOOST_ASSERT_MSG(false, "Should not be called !");
+        return 0;
+      }
 
-    static unsigned long key(unsigned char *buffer) {
-      BOOST_ASSERT_MSG(false, "Should not be called !");
-      return 0;
-    }
+      static unsigned long key(unsigned char *buffer) {
+        BOOST_ASSERT_MSG(false, "Should not be called !");
+        return 0;
+      }
   };
 
   template<typename A>
@@ -1789,9 +1782,9 @@ namespace x_lib {
     state_iter_work<A> work;
     const unsigned long me = slipstore::slipstore_client_fill->get_me();
     const unsigned long m = slipstore::slipstore_client_fill->get_machines();
-    for(unsigned long superp=me;
-	superp < sio->get_config()->super_partitions;
-	superp += m) {
+    for (unsigned long superp = me;
+         superp < sio->get_config()->super_partitions;
+         superp += m) {
       sio->state_load(superp);
       work.state_buffer = sio->state_buffer;
       work.superp = superp;

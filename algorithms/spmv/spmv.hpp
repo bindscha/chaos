@@ -18,6 +18,7 @@
 
 #ifndef _SPMV_
 #define _SPMV_
+
 #include "../../core/x-lib.hpp"
 #include "../../utils/options_utils.h"
 #include "../../utils/boost_log_wrapper.h"
@@ -29,171 +30,150 @@ namespace algorithm {
     template<typename F>
     class spmv {
     public:
-      static unsigned long checkpoint_size()
-      {
-	return 0;
-      }
+        static unsigned long checkpoint_size() {
+          return 0;
+        }
 
-      static void take_checkpoint(unsigned char* buffer,
-				  per_processor_data **cpu_array,
-				  unsigned long num_processors)
-      {
-      }
+        static void take_checkpoint(unsigned char *buffer,
+                                    per_processor_data **cpu_array,
+                                    unsigned long num_processors) {
+        }
 
-      static void restore_checkpoint(unsigned char* buffer,
-				     per_processor_data **cpu_array,
-				     unsigned long num_processors)
-      {
-      }
+        static void restore_checkpoint(unsigned char *buffer,
+                                       per_processor_data **cpu_array,
+                                       unsigned long num_processors) {
+        }
 
-      struct __attribute__((__packed__)) term {
-	vertex_t column;
-	weight_t value;
-      };
-    
-      struct __attribute__((__packed__)) vector_element {
-	weight_t value_out;
-	weight_t value_in;
-      };
+        struct __attribute__((__packed__)) term {
+            vertex_t column;
+            weight_t value;
+        };
 
-      static unsigned long split_size_bytes()
-      {
-	return sizeof(struct term);
-      }
-    
-      static unsigned long split_key(unsigned char *buffer,
-				     unsigned long jump)
-      {
-	struct term *t = (struct term *)buffer;
-	vertex_t key = t->column;
-	key = key >> jump;
-	return key;
-      }
+        struct __attribute__((__packed__)) vector_element {
+            weight_t value_out;
+            weight_t value_in;
+        };
 
-      static unsigned long vertex_state_bytes()
-      {
-	return sizeof(struct vector_element);
-      }
+        static unsigned long split_size_bytes() {
+          return sizeof(struct term);
+        }
 
-      static
-      bool need_data_barrier()
-      {
-	return false;
-      }
+        static unsigned long split_key(unsigned char *buffer,
+                                       unsigned long jump) {
+          struct term *t = (struct term *) buffer;
+          vertex_t key = t->column;
+          key = key >> jump;
+          return key;
+        }
 
-      class db_sync {
-      public:
-	void prep_db_data(per_processor_data **pcpu_array,
-			  unsigned long me,
-			  unsigned long processors)
-	{}
+        static unsigned long vertex_state_bytes() {
+          return sizeof(struct vector_element);
+        }
 
-	void finalize_db_data(per_processor_data **pcpu_array,
-			      unsigned long me,
-			      unsigned long processors)
-	{}
-	
-	unsigned char *db_buffer() 
-	{return NULL;}
+        static
+        bool need_data_barrier() {
+          return false;
+        }
 
-	unsigned long db_size()
-	{ return 0;}
+        class db_sync {
+        public:
+            void prep_db_data(per_processor_data **pcpu_array,
+                              unsigned long me,
+                              unsigned long processors) { }
 
-	void db_generate()
-	{}
+            void finalize_db_data(per_processor_data **pcpu_array,
+                                  unsigned long me,
+                                  unsigned long processors) { }
 
-	void db_merge()
-	{}
+            unsigned char *db_buffer() { return NULL; }
 
-	void db_absorb()
-	{}
-      };
-      
-      static
-      db_sync * get_db_sync() {return NULL;}
-      
-      static bool need_scatter_merge(unsigned long bsp_phase)
-      {
-	return false;
-      }
+            unsigned long db_size() { return 0; }
 
-      static void vertex_apply(unsigned char *v,
-			       unsigned char *copy,
-			       unsigned long copy_machine,
-			       per_processor_data *per_cpu_data,
-			       unsigned long bsp_phase)
-      {
-	struct vector_element *vtx     = (struct vector_element *)v;
-	struct vector_element *vtx_cpy = (struct vector_element *)copy;
-	vtx->value_out   += vtx_cpy->value_out;
-      }
-      
-      static bool apply_one_update(unsigned char *vertex_state,
-				   unsigned char *update_stream,
-				   per_processor_data *per_cpu_data,
-				   bool local_tile,
-				   unsigned long bsp_phase)
-      {
-      
-	struct term * t = (struct term *)update_stream;
-	unsigned long vindex = x_lib::configuration::map_offset(t->column);
-	struct vector_element *vect= (struct vector_element *)vertex_state;
-	vect[vindex].value_out += t->value; 
-	return false;
-      }
-    
-      static bool generate_update(unsigned char *vertex_state,
-				  unsigned char *edge_format,
-				  unsigned char *update_stream,
-				  per_processor_data *per_cpu_data,
-				  bool local_tile,
-				  unsigned long bsp_phase)
-      {
-	vertex_t row, column;
-	weight_t matrix_element;
-	F::read_matrix_element(edge_format, row, column, matrix_element);
-	unsigned long vindex = x_lib::configuration::map_offset(row);
-	struct vector_element *vector_input = 
-	  (struct vector_element *)vertex_state;
-	struct term *t = (struct term *)update_stream;
-	t->column = column;
-	t->value = matrix_element*vector_input[vindex].value_in;
-	return true;
-      }
-    
-      static bool init(unsigned char* vertex_state,
-		       unsigned long vertex_index,
-		       unsigned long bsp_phase,
-		       per_processor_data *cpu_state)
-      {
-	struct vector_element *vec = (struct vector_element *)vertex_state;
-	vec->value_out = 0;
-	vec->value_in = vertex_index;
-	return true;
-      }
+            void db_generate() { }
 
-      static bool need_init(unsigned long bsp_phase)
-      {
-	return (bsp_phase == 0);
-      }
+            void db_merge() { }
 
-      static void postprocessing() {}
-      static void preprocessing() {}
-    
-      static per_processor_data * 
-      create_per_processor_data(unsigned long processor_id,
-				unsigned long machines)
-      {
-	return NULL;
-      }
+            void db_absorb() { }
+        };
 
-      static unsigned long min_super_phases()
-      {
-	return 1;
-      }
+        static
+        db_sync *get_db_sync() { return NULL; }
+
+        static bool need_scatter_merge(unsigned long bsp_phase) {
+          return false;
+        }
+
+        static void vertex_apply(unsigned char *v,
+                                 unsigned char *copy,
+                                 unsigned long copy_machine,
+                                 per_processor_data *per_cpu_data,
+                                 unsigned long bsp_phase) {
+          struct vector_element *vtx = (struct vector_element *) v;
+          struct vector_element *vtx_cpy = (struct vector_element *) copy;
+          vtx->value_out += vtx_cpy->value_out;
+        }
+
+        static bool apply_one_update(unsigned char *vertex_state,
+                                     unsigned char *update_stream,
+                                     per_processor_data *per_cpu_data,
+                                     bool local_tile,
+                                     unsigned long bsp_phase) {
+
+          struct term *t = (struct term *) update_stream;
+          unsigned long vindex = x_lib::configuration::map_offset(t->column);
+          struct vector_element *vect = (struct vector_element *) vertex_state;
+          vect[vindex].value_out += t->value;
+          return false;
+        }
+
+        static bool generate_update(unsigned char *vertex_state,
+                                    unsigned char *edge_format,
+                                    unsigned char *update_stream,
+                                    per_processor_data *per_cpu_data,
+                                    bool local_tile,
+                                    unsigned long bsp_phase) {
+          vertex_t row, column;
+          weight_t matrix_element;
+          F::read_matrix_element(edge_format, row, column, matrix_element);
+          unsigned long vindex = x_lib::configuration::map_offset(row);
+          struct vector_element *vector_input =
+              (struct vector_element *) vertex_state;
+          struct term *t = (struct term *) update_stream;
+          t->column = column;
+          t->value = matrix_element * vector_input[vindex].value_in;
+          return true;
+        }
+
+        static bool init(unsigned char *vertex_state,
+                         unsigned long vertex_index,
+                         unsigned long bsp_phase,
+                         per_processor_data *cpu_state) {
+          struct vector_element *vec = (struct vector_element *) vertex_state;
+          vec->value_out = 0;
+          vec->value_in = vertex_index;
+          return true;
+        }
+
+        static bool need_init(unsigned long bsp_phase) {
+          return (bsp_phase == 0);
+        }
+
+        static void postprocessing() { }
+
+        static void preprocessing() { }
+
+        static per_processor_data *
+        create_per_processor_data(unsigned long processor_id,
+                                  unsigned long machines) {
+          return NULL;
+        }
+
+        static unsigned long min_super_phases() {
+          return 1;
+        }
 
     };
   }
-}    
+}
 
 #endif

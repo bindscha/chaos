@@ -19,50 +19,51 @@
 // Until boost::log becomes mainstream use this substitute
 #ifndef _BOOST_LOG_WRAPPER_
 #define _BOOST_LOG_WRAPPER_
+
 #include<iostream>
 #include<string>
 #include<sstream>
 #include<boost/thread.hpp>
+
 enum log_state {
-  fatal = 0,
-  error = 1,
-  warn = 2,
-  info = 3,
-  total = 4
+    fatal = 0,
+    error = 1,
+    warn = 2,
+    info = 3,
+    total = 4
 };
 
-static const char *log_headers[total] = 
-{"FATAL", 
- "ERROR",
- "WARNING",
- "INFO"};
+static const char *log_headers[total] =
+    {"FATAL",
+     "ERROR",
+     "WARNING",
+     "INFO"};
 
 class BOOST_LOG_TRIVIAL {
-  enum log_state level;
- public:
-  std::stringstream state;
-  BOOST_LOG_TRIVIAL(enum log_state level_in)
-    :level(level_in)
-  {
-  }
-  template<typename T>
-  BOOST_LOG_TRIVIAL& operator<< (T value)
-  {
-    state << value;
-    return *this;
-  }
-  
-  ~BOOST_LOG_TRIVIAL()
-  {
-    std::stringstream final;
-    final << "<" << log_headers[level] << " ";
-    final << boost::this_thread::get_id() << "> ";
-    final << state.str() << std::endl;
-    std::cerr << final.str();
-    if(level == fatal) {
-      BOOST_ASSERT_MSG(false, "Fatal stop.");
+    enum log_state level;
+public:
+    std::stringstream state;
+
+    BOOST_LOG_TRIVIAL(enum log_state level_in)
+        : level(level_in) {
     }
-  }
+
+    template<typename T>
+    BOOST_LOG_TRIVIAL &operator<<(T value) {
+      state << value;
+      return *this;
+    }
+
+    ~BOOST_LOG_TRIVIAL() {
+      std::stringstream final;
+      final << "<" << log_headers[level] << " ";
+      final << boost::this_thread::get_id() << "> ";
+      final << state.str() << std::endl;
+      std::cerr << final.str();
+      if (level == fatal) {
+        BOOST_ASSERT_MSG(false, "Fatal stop.");
+      }
+    }
 };
 
 #endif
