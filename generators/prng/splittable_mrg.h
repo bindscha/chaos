@@ -27,22 +27,22 @@ extern "C" {
 #endif
 
 typedef struct mrg_state {
-    uint_fast32_t z1, z2, z3, z4, z5;
+  uint_fast32_t z1, z2, z3, z4, z5;
 } mrg_state;
 
 /* Returns integer value in [0, 2^31-1) using original transition matrix */
-uint_fast32_t mrg_get_uint_orig(mrg_state *state);
+uint_fast32_t mrg_get_uint_orig(mrg_state* state);
 
 /* Returns real value in [0, 1) using original transition matrix */
-double mrg_get_double_orig(mrg_state *state);
+double mrg_get_double_orig(mrg_state* state);
 
 /* Seed PRNG with a given array of five values in the range [0, 0x7FFFFFFE] and
  * not all zero. */
-void mrg_seed(mrg_state *st, const uint_fast32_t seed[5]);
+void mrg_seed(mrg_state* st, const uint_fast32_t seed[5]);
 
 /* Skip the PRNG ahead _exponent_ steps.  This code treats the exponent as a
  * 192-bit word, even though the PRNG period is less than that. */
-void mrg_skip(mrg_state *state,
+void mrg_skip(mrg_state* state,
               uint_least64_t exponent_high,
               uint_least64_t exponent_middle,
               uint_least64_t exponent_low);
