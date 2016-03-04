@@ -1490,7 +1490,7 @@ namespace x_lib {
       else {
         partition = index;
       }
-      if (partition % sio->get_config()->super_partitions != me) {
+      if (partition % m != me) {
         continue;
       }
 
