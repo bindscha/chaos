@@ -747,7 +747,7 @@ namespace x_lib {
           // - The last round has id tile_size / (m * slipchunk)
           // => If round id != last_round and the server access failed, die
           if (!slipstore::slipstore_client_fill->access_store(&req, state_buffer->get_buffer() + fill_offset,
-                                                              striping ? i : tile)
+                                                              striping ? i : start_mc)
               && seek_offset / slipchunk != tile_bytes / (m * slipchunk)) {
             BOOST_LOG_TRIVIAL(fatal) << "Unable to copy tile";
             exit(-1);
